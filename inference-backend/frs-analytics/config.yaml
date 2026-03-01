@@ -1,0 +1,35 @@
+# FRS (Face Recognition System) Pipeline Configuration
+# Set local_only: true to skip the API fetch and use only rtsp_sources below.
+# Set local_only: false (or remove it) to fetch camera configs from the backend API.
+
+api_base_url: http://localhost:3001/api
+api_token: ""
+local_only: true
+
+rtsp_sources:
+  - name: cam_frs_1
+    camera_id: demo-crowd
+    location_id: local
+    rtsp_url: /Users/kaushal/Desktop/Iris-sringeri/public/media/video1.mp4
+    fps: 5
+    skip_frames: 8
+    rtsp_transport: tcp
+    buffer_size: 1
+    api_base_url: http://localhost:3001/api
+    api_token: ""
+    analytic_config:
+      match_threshold: 0.35
+
+  # Per-camera analytic tuning (override defaults)
+  # analytic_config:
+  #   det_size: [1024, 1024]
+  #   det_thresh: 0.35
+  #   use_letterbox: true
+  #   confidence_threshold: 0.2
+  #   face_area_threshold: 256
+  #   match_threshold: 0.30
+  #   similarity_threshold: 0.65
+  #   duplicate_short_window: 30.0
+  #   duplicate_long_window: 300.0
+  #   jpeg_quality: 90
+  #   full_frame_resize_height: 1080

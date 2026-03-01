@@ -1,0 +1,22 @@
+[Unit]
+Description=IRIS Distributed FRS Ingress Distributor Service
+After=network-online.target iris-edge-gateway.service
+Wants=network-online.target
+Requires=iris-edge-gateway.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/iris-edge/inference-backend/frs-distributed
+EnvironmentFile=-/etc/iris-edge/edge.env
+ExecStart=/bin/bash -lc '${EDGE_PYTHON_BIN:-/opt/iris-edge/.venv/bin/python} /opt/iris-edge/inference-backend/frs-distributed/distributor_service.py'
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

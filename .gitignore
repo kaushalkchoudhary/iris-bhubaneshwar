@@ -1,0 +1,102 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Python environments
+venv/
+.venv/
+env/
+.env/
+**/.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# Model files
+*.pt
+*.pth
+*.onnx
+*.pb
+*.h5
+*.hdf5
+*.pkl
+*.bin
+*.safetensors
+*.gguf
+*.mlmodel
+*.tflite
+*.weights
+models/
+weights/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.vercel
+
+# Generated heatmaps
+heatmaps/
+
+# Videos
+**/*.mp4
+**/*.avi
+**/*.mkv
+**/*.mov
+server/videos/
+irisv3/backend/videos/
+
+# Environment files (contain credentials)
+.env
+*.env
+!*.env.example
+
+# Compiled Go binaries
+backend/iris-backend
+backend/iris2new-backend
+backend/iris*-backend
+
+# Runtime logs and PID files
+runtime-logs/
+public/
+
+# RTSP testing (contains videos and binaries)
+rtsp_testing/
+
+# Nginx backups
+nginx-backups/
+
+# ANPR/FRS runtime capture images (operational data, not source)
+backend/itms/data/
+
+# ANPR-VCC analytics runtime dirs
+inference-backend/ANPR-VCC_analytics/output/
+
+# --- Local Junk ---
+Screenshot*.png
+reports/
+magicwatchdog/magicwatchdog-arm64
+iris.webp
+typescript

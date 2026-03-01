@@ -1,0 +1,577 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #f6f8fb;
+  --foreground: #0b1220;
+  --card: #fbfdff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
+  --popover-foreground: #09090b;
+  --primary: #6366f1;
+  --primary-foreground: #fafafa;
+  --secondary: #eef2f6;
+  --secondary-foreground: #18181b;
+  --muted: #e9edf4;
+  --muted-foreground: #4b5563;
+  --accent: #e6edf7;
+  --accent-foreground: #18181b;
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+  --border: #cdd6e1;
+  --input: #cdd6e1;
+  --ring: #6366f1;
+  --radius: 0.625rem;
+  --chart-1: #6366f1;
+  --chart-2: #10b981;
+  --chart-3: #f59e0b;
+  --chart-4: #3b82f6;
+  --chart-5: #ef4444;
+  --sidebar: #f7f9fc;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #e9edf4;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: #cdd6e1;
+  --sidebar-ring: #6366f1;
+}
+
+.dark {
+  --background: #050505;
+  --foreground: #fafafa;
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  --popover: #18181b;
+  --popover-foreground: #fafafa;
+  --primary: #6366f1;
+  --primary-foreground: #fafafa;
+  --secondary: rgba(255, 255, 255, 0.05);
+  --secondary-foreground: #d4d4d8;
+  --muted: rgba(255, 255, 255, 0.05);
+  --muted-foreground: #a1a1aa;
+  --accent: rgba(255, 255, 255, 0.05);
+  --accent-foreground: #fafafa;
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+  --border: rgba(255, 255, 255, 0.05);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #6366f1;
+  --chart-1: #6366f1;
+  --chart-2: #10b981;
+  --chart-3: #f59e0b;
+  --chart-4: #3b82f6;
+  --chart-5: #ef4444;
+  --sidebar: rgba(9, 9, 11, 0.3);
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: rgba(255, 255, 255, 0.05);
+  --sidebar-accent-foreground: #f4f4f5;
+  --sidebar-border: rgba(255, 255, 255, 0.05);
+  --sidebar-ring: #6366f1;
+}
+
+/* DEVMODE accent color utilities */
+:root {
+  --color-indigo: #6366f1;
+  --color-orange: #f97316;
+  --color-blue: #3b82f6;
+  --color-emerald: #10b981;
+  --color-amber: #f59e0b;
+  --color-red: #ef4444;
+}
+
+* {
+  border-color: transparent;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'DM Sans', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-feature-settings: "rlig" 1, "calt" 1;
+  font-optical-sizing: auto;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code,
+pre,
+[data-mono] {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* DEVMODE scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Selection styling */
+::selection {
+  background: rgba(99, 102, 241, 0.3);
+  color: #fafafa;
+}
+
+/* DEVMODE glassmorphism */
+.glass {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.dark .glass {
+  background: rgba(5, 5, 5, 0.8);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Smooth transitions */
+* {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body {
+    @apply h-full w-full m-0 p-0;
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  #root {
+    @apply h-full w-full;
+    overflow: hidden;
+  }
+}
+
+.app-shell-bg {
+  position: relative;
+  background:
+    radial-gradient(1200px 700px at 20% -10%, rgba(99, 102, 241, 0.14), transparent 55%),
+    radial-gradient(1200px 700px at 100% 110%, rgba(16, 185, 129, 0.1), transparent 58%),
+    linear-gradient(180deg, color-mix(in srgb, var(--background) 94%, #020617) 0%, var(--background) 100%);
+}
+
+.app-shell-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.18;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.14) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+.app-shell-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.1;
+  background-image: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.2) 0 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+
+/* ═══════════════════════════════════════════════════════
+   GLASSMORPHIC BUTTON SYSTEM
+   ═══════════════════════════════════════════════════════ */
+
+@property --glass-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes glass-rotate {
+  to {
+    --glass-angle: 360deg;
+  }
+}
+
+/* Base glass button */
+.btn-glass {
+  position: relative;
+  z-index: 0;
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--glass-angle),
+      transparent 40%,
+      var(--glass-tint, rgba(255, 255, 255, 0.15)) 50%,
+      transparent 60%);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  opacity: 0;
+  animation: glass-rotate 4s linear infinite;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.btn-glass:hover::before {
+  opacity: 1;
+}
+
+.btn-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(ellipse at 50% 0%,
+      var(--glass-tint, rgba(255, 255, 255, 0.06)) 0%,
+      transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.btn-glass:hover::after {
+  opacity: 1;
+}
+
+.btn-glass:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 24px -4px var(--glass-shadow, rgba(255, 255, 255, 0.05));
+}
+
+.btn-glass:active {
+  transform: scale(0.97);
+}
+
+.btn-glass:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Light theme overrides for glass buttons (improve contrast on white backgrounds) */
+.light .btn-glass {
+  background: rgba(9, 9, 11, 0.035);
+  border-color: rgba(9, 9, 11, 0.12);
+}
+
+.light .btn-glass:hover {
+  background: rgba(9, 9, 11, 0.06);
+  border-color: rgba(9, 9, 11, 0.18);
+  box-shadow: 0 4px 24px -4px var(--glass-shadow, rgba(9, 9, 11, 0.08));
+}
+
+/* Glass tint variants */
+.btn-glass-default {
+  --glass-tint: rgba(255, 255, 255, 0.2);
+  --glass-shadow: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f4f4f5;
+}
+
+.btn-glass-default:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.light .btn-glass-default {
+  --glass-tint: rgba(9, 9, 11, 0.12);
+  --glass-shadow: rgba(9, 9, 11, 0.08);
+  background: rgba(9, 9, 11, 0.045);
+  border-color: rgba(9, 9, 11, 0.14);
+  color: var(--foreground);
+}
+
+.light .btn-glass-default:hover {
+  background: rgba(9, 9, 11, 0.06);
+}
+
+.btn-glass-indigo {
+  /* Use color-mix to derive opacity variants from the dynamic accent color */
+  --glass-tint: color-mix(in srgb, var(--accent-color), transparent 50%);
+  --glass-shadow: color-mix(in srgb, var(--accent-color), transparent 80%);
+  background: color-mix(in srgb, var(--accent-color), transparent 88%);
+  border-color: color-mix(in srgb, var(--accent-color), transparent 80%);
+  color: color-mix(in srgb, var(--accent-color), white 20%);
+}
+
+.btn-glass-indigo:hover {
+  background: color-mix(in srgb, var(--accent-color), transparent 82%);
+  border-color: color-mix(in srgb, var(--accent-color), transparent 70%);
+}
+
+.btn-glass-red {
+  --glass-tint: rgba(239, 68, 68, 0.5);
+  --glass-shadow: rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.btn-glass-red:hover {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.btn-glass-outline {
+  --glass-tint: rgba(255, 255, 255, 0.15);
+  --glass-shadow: rgba(255, 255, 255, 0.03);
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #d4d4d8;
+}
+
+.btn-glass-outline:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.light .btn-glass-outline {
+  --glass-tint: rgba(9, 9, 11, 0.12);
+  --glass-shadow: rgba(9, 9, 11, 0.06);
+  border-color: rgba(9, 9, 11, 0.14);
+  color: var(--foreground);
+}
+
+.light .btn-glass-outline:hover {
+  background: rgba(9, 9, 11, 0.04);
+  border-color: rgba(9, 9, 11, 0.18);
+}
+
+.btn-glass-secondary {
+  --glass-tint: rgba(255, 255, 255, 0.15);
+  --glass-shadow: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.06);
+  color: #d4d4d8;
+}
+
+.btn-glass-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.light .btn-glass-secondary {
+  --glass-tint: rgba(9, 9, 11, 0.12);
+  --glass-shadow: rgba(9, 9, 11, 0.06);
+  background: rgba(9, 9, 11, 0.03);
+  border-color: rgba(9, 9, 11, 0.10);
+  color: var(--foreground);
+}
+
+.light .btn-glass-secondary:hover {
+  background: rgba(9, 9, 11, 0.05);
+  border-color: rgba(9, 9, 11, 0.14);
+}
+
+/* Scan animation for VectorPad radar sweep */
+@keyframes scan {
+  0% {
+    transform: translateY(-50%);
+  }
+
+  100% {
+    transform: translateY(0%);
+  }
+}
+
+/* GLOBAL OVERRIDES for Hardcoded Dark Mode Styles */
+/* These rules force hardcoded dark classes to look 'light' when in .light mode */
+
+.light .bg-zinc-900,
+.light .bg-zinc-950,
+.light .bg-black {
+  background-color: var(--card) !important;
+  color: var(--card-foreground) !important;
+}
+
+.light .bg-zinc-800,
+.light .bg-zinc-900\/30,
+.light .bg-zinc-900\/50,
+.light .bg-zinc-900\/20,
+.light .bg-black\/20 {
+  background-color: var(--muted) !important;
+  border-color: var(--border) !important;
+}
+
+.light .text-white,
+.light .text-zinc-100,
+.light .text-zinc-200,
+.light .text-zinc-300 {
+  color: var(--foreground) !important;
+}
+
+.light .text-zinc-400,
+.light .text-zinc-500,
+.light .text-zinc-600 {
+  color: var(--muted-foreground) !important;
+}
+
+.light .border-white\/5,
+.light .border-white\/10 {
+  border-color: var(--border) !important;
+}
+
+.light .hover\:bg-zinc-900\/50:hover {
+  background-color: var(--accent) !important;
+}
+
+/* Shared internal-dashboard surface and scroll containers */
+.iris-dashboard-root {
+  background:
+    radial-gradient(1200px 500px at 0% 0%, rgba(59, 130, 246, 0.1), transparent 50%),
+    radial-gradient(900px 420px at 100% 100%, rgba(16, 185, 129, 0.08), transparent 55%),
+    #030814;
+}
+
+.iris-dashboard-root::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.12;
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.25) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.25) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.iris-scroll-area {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
+.iris-cut-tag-base {
+  position: relative;
+  border-width: 1px;
+  border-style: solid;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 45%, 100% 100%, 8px 100%, 0 55%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 12px rgba(0, 0, 0, 0.25);
+}
+
+.iris-cut-tag-default {
+  color: #dbeafe;
+  border-color: rgba(99, 102, 241, 0.65);
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.95), rgba(49, 46, 129, 0.42));
+}
+
+.iris-cut-tag-info {
+  color: #dbeafe;
+  border-color: rgba(59, 130, 246, 0.65);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.95), rgba(30, 58, 138, 0.45));
+}
+
+.iris-cut-tag-success {
+  color: #dcfce7;
+  border-color: rgba(16, 185, 129, 0.7);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.94), rgba(6, 78, 59, 0.45));
+}
+
+.iris-cut-tag-warning {
+  color: #fef3c7;
+  border-color: rgba(245, 158, 11, 0.72);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.95), rgba(120, 53, 15, 0.48));
+}
+
+.iris-cut-tag-danger {
+  color: #fee2e2;
+  border-color: rgba(239, 68, 68, 0.72);
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.95), rgba(127, 29, 29, 0.46));
+}
+
+.iris-cut-tag-secondary {
+  color: #e4e4e7;
+  border-color: rgba(113, 113, 122, 0.66);
+  background: linear-gradient(180deg, rgba(113, 113, 122, 0.92), rgba(39, 39, 42, 0.48));
+}

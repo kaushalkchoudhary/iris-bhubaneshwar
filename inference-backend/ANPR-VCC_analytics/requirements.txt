@@ -1,0 +1,16 @@
+ultralytics
+supervision
+opencv-python
+# Keep numpy aligned across all inference services.
+numpy
+pillow
+fastapi
+uvicorn
+sqlalchemy
+requests
+passlib
+python-jose[cryptography]
+
+# TensorRT (included with NVIDIA drivers/CUDA toolkit)
+# If missing, install: pip install tensorrt
+# For Jetson: sudo apt-get install nvidia-tensorrt

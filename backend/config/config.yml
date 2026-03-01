@@ -1,0 +1,268 @@
+# Generated from backend DB (workers/devices assignments).
+# Edit via UI/API; backend rewrites this file on topology changes.
+
+jetsons:
+    - id: wk_e56d0426fa6fefdd
+      name: jetson-22
+      ip: 10.10.0.22
+      mac: 5b:db:95:4d:b9:fa
+      model: Jetson Orin Nano
+      zone_id: zone_pending
+      password: jetson
+      cameras:
+        - camera_id: cam_d15
+          name: D15 - LG FLOOR NEAR ENV SEC
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.66/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - crowd
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d16
+          name: D16 - UG FLOOR ENTRY GATE
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.67/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - crowd
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d17
+          name: D17 - UG FLOOR RECEPTION
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.68/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - crowd
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d18
+          name: D18 - UG FLOOR LIFT 1
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.69/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - crowd
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+    - id: wk_be1f712f8a40b87e
+      name: jetson-150
+      ip: 10.10.0.150
+      mac: 07:27:38:e2:34:3c
+      model: Jetson Orin Nano
+      zone_id: zone_pending
+      password: jetson
+      cameras:
+        - camera_id: cam_d19
+          name: D19 - UG FLOOR LIFT 2
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.70/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d20
+          name: D20 - UG FLOOR LIFT 3
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.71/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d21
+          name: D21 - UG FLOOR LIFT 4
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.72/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d22
+          name: D22 - UG FLOOR NEAR MAYOR
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.73/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+    - id: wk_51b031e35d101ded
+      name: jetson-11
+      ip: 10.10.0.11
+      mac: 4c:bb:47:18:9a:23
+      model: Jetson Orin Nano
+      zone_id: zone_pending
+      password: jetson
+      cameras:
+        - camera_id: cam_d03
+          name: D3 - LG FLOOR LIFT 1
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.53/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d04
+          name: D4 - LG FLOOR MINI CNFRNS HALL
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.54/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d05
+          name: D5 - LG FLOOR EKAMRA 1
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.55/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d06
+          name: D6 - LG FLOOR EKAMRA EXIT
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.56/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+    - id: wk_92597e147bf7ea97
+      name: jetson-13
+      ip: 10.10.0.13
+      mac: 4c:bb:47:18:9d:59
+      model: Jetson Orin Nano
+      zone_id: zone_pending
+      password: jetson
+      cameras:
+        - camera_id: cam_d07
+          name: D7 - LG FLOOR EKAMRA 2
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.57/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - crowd
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d08
+          name: D8 - LG FLOOR LIFT 2
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.58/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - crowd
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d09
+          name: D9 - LG FLOOR NEAR NULM SEC
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.59/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - crowd
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d10
+          name: D10 - LG FLOOR LIFT 5
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.60/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - crowd
+          analytic_config:
+            fps: 15
+            resolution: 720p
+    - id: wk_50c16c4103b9c13f
+      name: jetson-14
+      ip: 10.10.0.14
+      mac: 1b:83:a5:25:d9:81
+      model: Jetson Orin Nano
+      zone_id: zone_pending
+      password: jetson
+      cameras:
+        - camera_id: cam_d11
+          name: D11 - LG FLOOR LIFT 6
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.61/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d12
+          name: D12 - LG FLOOR LIFT 3
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.62/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d13
+          name: D13 - LG FLOOR LIFT 4
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.63/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d14
+          name: D14 - LG FLOOR EXIT GATE
+          rtsp_url: rtsp://admin:Admin%40123@172.16.1.64/media/video1
+          zone_id: ""
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p

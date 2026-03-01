@@ -1,0 +1,23 @@
+[Unit]
+Description=IRIS Edge Agent (Jetson)
+After=network-online.target
+Wants=network-online.target
+After=iris-edge-gateway.service
+Requires=iris-edge-gateway.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/iris-edge
+EnvironmentFile=-/etc/iris-edge/edge.env
+ExecStart=/bin/bash -lc '${EDGE_PYTHON_BIN:-/opt/iris-edge/.venv/bin/python} /opt/iris-edge/edge_agent.py'
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=20
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

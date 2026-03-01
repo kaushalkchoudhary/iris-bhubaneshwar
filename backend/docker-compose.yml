@@ -1,0 +1,61 @@
+name: iris2new
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: iris2new-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iris}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iris_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-irisdrone}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  frs_db:
+    image: pgvector/pgvector:pg16
+    container_name: iris2new-frs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${FRS_POSTGRES_USER:-iris}
+      POSTGRES_PASSWORD: ${FRS_POSTGRES_PASSWORD:-iris_dev_password}
+      POSTGRES_DB: ${FRS_POSTGRES_DB:-irisfrs}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - frs_postgres_data:/var/lib/postgresql/data
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: iris2new-mqtt
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
+
+#   backend:
+#     build: .
+#     restart: always
+#     ports:
+#       - "3001:3001"
+#     environment:
+#       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+#       PORT: 3001
+#       ENV: production
+#     depends_on:
+#       - db
+
+volumes:
+  postgres_data:
+    name: iris2new-postgres-data
+  frs_postgres_data:
+    name: iris2new-frs-postgres-data
+  mosquitto_data:
+    name: iris2new-mqtt-data
+  mosquitto_logs:
+    name: iris2new-mqtt-logs

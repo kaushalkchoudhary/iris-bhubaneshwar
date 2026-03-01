@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  IRIS Backend — macOS LaunchAgent
+  ─────────────────────────────────────────────────────────────────────────────
+  Install (one-time setup):
+    cp /Users/kaushal/Desktop/Iris-sringeri/scripts/com.iris.backend.plist \
+       ~/Library/LaunchAgents/com.iris.backend.plist
+    launchctl load ~/Library/LaunchAgents/com.iris.backend.plist
+
+  Check status:
+    launchctl list | grep iris
+
+  Stop:
+    launchctl unload ~/Library/LaunchAgents/com.iris.backend.plist
+
+  Logs:
+    tail -f /Users/kaushal/Desktop/Iris-sringeri/runtime-logs/backend.log
+  ─────────────────────────────────────────────────────────────────────────────
+-->
+<plist version="1.0">
+<dict>
+
+    <key>Label</key>
+    <string>com.iris.backend</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/kaushal/Desktop/Iris-sringeri/scripts/iris_backend.sh</string>
+    </array>
+
+    <!-- Run as soon as the plist is loaded (login / launchctl load) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart automatically if the process exits -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- 10-second throttle between restarts to prevent rapid crash loops -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/kaushal/Desktop/Iris-sringeri/backend</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/kaushal/Desktop/Iris-sringeri/runtime-logs/backend.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/kaushal/Desktop/Iris-sringeri/runtime-logs/backend.log</string>
+
+    <!-- Let the wrapper script set all environment variables via .env -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/kaushal</string>
+        <key>PATH</key>
+        <string>/usr/local/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+</dict>
+</plist>

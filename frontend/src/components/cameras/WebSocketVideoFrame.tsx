@@ -1,0 +1,393 @@
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { Camera, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+
+interface Detection {
+  type: string;
+  confidence: number;
+  bbox?: [number, number, number, number]; // x, y, width, height
+  label?: string;
+  color?: string;
+}
+
+interface WebSocketVideoFrameProps {
+  workerId: string;
+  cameraId: string;
+  showOverlays?: boolean;
+  enabledServices?: string[];
+  serviceFilter?: string;
+  className?: string;
+  onConnectionChange?: (connected: boolean) => void;
+}
+
+// Global WebSocket connection (shared across all video frames)
+let globalWs: WebSocket | null = null;
+let wsConnecting = false;
+const wsSubscribers = new Map<string, Set<(data: ArrayBuffer | Detection[]) => void>>();
+let reconnectTimeout: number | null = null;
+
+function getWsUrl(): string {
+  // Connect to backend WebSocket
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // Backend is on port 3002
+  return `${protocol}//${window.location.hostname}:3002/ws/feeds`;
+}
+
+function connectWebSocket() {
+  if (globalWs?.readyState === WebSocket.OPEN || wsConnecting) {
+    return;
+  }
+
+  wsConnecting = true;
+  const ws = new WebSocket(getWsUrl());
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    console.log('📺 WebSocket connected to feed hub');
+    globalWs = ws;
+    wsConnecting = false;
+
+    // Re-subscribe to all cameras
+    wsSubscribers.forEach((_, cameraKey) => {
+      ws.send(JSON.stringify({ type: 'subscribe', camera: cameraKey }));
+    });
+  };
+
+  ws.onmessage = (event) => {
+    if (event.data instanceof ArrayBuffer) {
+      // Binary frame message
+      // Format: [1 byte type][1 byte key length][camera key][frame data]
+      const data = new Uint8Array(event.data);
+      if (data[0] !== 0x01) return; // Not a frame
+
+      const keyLength = data[1];
+      const cameraKey = new TextDecoder().decode(data.slice(2, 2 + keyLength));
+      const frameData = data.slice(2 + keyLength);
+
+      // Dispatch to subscribers
+      const handlers = wsSubscribers.get(cameraKey);
+      if (handlers) {
+        handlers.forEach(handler => handler(frameData.buffer));
+      }
+    } else {
+      // Text JSON message (detections, errors, etc.)
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'detection' && msg.camera) {
+          const handlers = wsSubscribers.get(msg.camera);
+          if (handlers) {
+            handlers.forEach(handler => handler(msg.data));
+          }
+        } else if (msg.type === 'error') {
+          console.error('Feed hub error:', msg.error);
+        }
+      } catch (e) {
+        console.error('Failed to parse WebSocket message:', e);
+      }
+    }
+  };
+
+  ws.onclose = () => {
+    console.log('📺 WebSocket disconnected');
+    globalWs = null;
+    wsConnecting = false;
+
+    // Reconnect after delay
+    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    reconnectTimeout = window.setTimeout(() => {
+      if (wsSubscribers.size > 0) {
+        connectWebSocket();
+      }
+    }, 3000);
+  };
+
+  ws.onerror = (error) => {
+    console.error('📺 WebSocket error:', error);
+    wsConnecting = false;
+  };
+}
+
+function subscribe(cameraKey: string, handler: (data: ArrayBuffer | Detection[]) => void) {
+  if (!wsSubscribers.has(cameraKey)) {
+    wsSubscribers.set(cameraKey, new Set());
+  }
+  wsSubscribers.get(cameraKey)!.add(handler);
+
+  // Connect if not connected
+  connectWebSocket();
+
+  // Send subscribe message if connected
+  if (globalWs?.readyState === WebSocket.OPEN) {
+    globalWs.send(JSON.stringify({ type: 'subscribe', camera: cameraKey }));
+  }
+}
+
+function unsubscribe(cameraKey: string, handler: (data: ArrayBuffer | Detection[]) => void) {
+  const handlers = wsSubscribers.get(cameraKey);
+  if (handlers) {
+    handlers.delete(handler);
+    if (handlers.size === 0) {
+      wsSubscribers.delete(cameraKey);
+      
+      // Send unsubscribe message
+      if (globalWs?.readyState === WebSocket.OPEN) {
+        globalWs.send(JSON.stringify({ type: 'unsubscribe', camera: cameraKey }));
+      }
+    }
+  }
+
+  // Disconnect if no more subscribers
+  if (wsSubscribers.size === 0 && globalWs) {
+    globalWs.close();
+    globalWs = null;
+  }
+}
+
+export function WebSocketVideoFrame({
+  workerId,
+  cameraId,
+  showOverlays = true,
+  enabledServices = [],
+  serviceFilter = 'all',
+  className = '',
+  onConnectionChange,
+}: WebSocketVideoFrameProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [connected, setConnected] = useState(false);
+  const [lastFrameTime, setLastFrameTime] = useState<number>(0);
+  const [fps, setFps] = useState<number>(0);
+  const [detections, setDetections] = useState<Detection[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const frameCountRef = useRef(0);
+  const lastFpsUpdateRef = useRef(Date.now());
+  const detectionsRef = useRef<Detection[]>([]);
+  const overlayConfigRef = useRef({
+    showOverlays: true,
+    enabledServices: [] as string[],
+    serviceFilter: 'all',
+  });
+
+  useEffect(() => {
+    overlayConfigRef.current = { showOverlays, enabledServices, serviceFilter };
+  }, [showOverlays, enabledServices, serviceFilter]);
+
+  const cameraKey = `${workerId}.${cameraId}`;
+
+  // Handle incoming data (frames or detections)
+  const handleData = useCallback((data: ArrayBuffer | Detection[]) => {
+    if (data instanceof ArrayBuffer) {
+      // Frame data
+      const blob = new Blob([data], { type: 'image/jpeg' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      
+      img.onload = () => {
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            // Resize canvas to match image
+            if (canvas.width !== img.width || canvas.height !== img.height) {
+              canvas.width = img.width;
+              canvas.height = img.height;
+            }
+            
+            // Draw frame
+            ctx.drawImage(img, 0, 0);
+            
+            const overlayCfg = overlayConfigRef.current;
+            const filtered = filterDetections(
+              detectionsRef.current,
+              overlayCfg.enabledServices,
+              overlayCfg.serviceFilter
+            );
+            if (overlayCfg.showOverlays && filtered.length > 0) {
+              drawDetections(ctx, filtered, img.width, img.height);
+            }
+          }
+        }
+        URL.revokeObjectURL(url);
+        
+        // Update stats
+        setLastFrameTime(Date.now());
+        setConnected(true);
+        setError(null);
+        
+        // Calculate FPS
+        frameCountRef.current++;
+        const now = Date.now();
+        if (now - lastFpsUpdateRef.current >= 1000) {
+          setFps(frameCountRef.current);
+          frameCountRef.current = 0;
+          lastFpsUpdateRef.current = now;
+        }
+      };
+      
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        setError('Failed to decode frame');
+      };
+      
+      img.src = url;
+    } else {
+      // Detection data - can be array or object with detections property
+      if (Array.isArray(data)) {
+        const next = data as Detection[];
+        detectionsRef.current = next;
+        setDetections(next);
+      } else if (data && typeof data === 'object' && 'detections' in data) {
+        // Handle YOLO worker format: { camera_id, timestamp, detections: [...] }
+        const next = (data as { detections: Detection[] }).detections;
+        detectionsRef.current = next;
+        setDetections(next);
+      }
+    }
+  }, []);
+
+  // Subscribe/unsubscribe on mount/unmount
+  useEffect(() => {
+    subscribe(cameraKey, handleData);
+    
+    return () => {
+      unsubscribe(cameraKey, handleData);
+    };
+  }, [cameraKey, handleData]);
+
+  // Check for stale connection
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (lastFrameTime && Date.now() - lastFrameTime > 5000) {
+        setConnected(false);
+        setError('No frames received');
+      }
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [lastFrameTime]);
+
+  // Notify parent of connection changes
+  useEffect(() => {
+    onConnectionChange?.(connected);
+  }, [connected, onConnectionChange]);
+
+  return (
+    <div className={`relative w-full h-full bg-zinc-900 ${className}`}>
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full object-contain"
+      />
+      
+      {/* Status overlay */}
+      <div className="absolute top-2 right-2 flex items-center gap-2">
+        {connected ? (
+          <div className="bg-green-500/80 rounded-full px-2 py-0.5 flex items-center gap-1">
+            <Wifi className="w-3 h-3 text-white" />
+            <span className="text-xs text-white font-medium">{fps} fps{detections.length > 0 ? ` · ${detections.length} face${detections.length !== 1 ? 's' : ''}` : ''}</span>
+          </div>
+        ) : (
+          <div className="bg-zinc-800/90 rounded-full px-2 py-0.5 flex items-center gap-1">
+            <WifiOff className="w-3 h-3 text-zinc-400" />
+            <span className="text-xs text-zinc-400 font-medium">No stream</span>
+          </div>
+        )}
+      </div>
+
+      {/* Waiting / error overlay */}
+      {!connected && (
+        <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/80">
+          <div className="text-center">
+            <Camera className="w-10 h-10 text-zinc-600 mx-auto mb-2 animate-pulse" />
+            <p className="text-xs text-zinc-500">Waiting for Jetson stream…</p>
+            {error && <p className="text-[10px] text-red-500 mt-1">{error}</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function detectionService(type: string): 'anpr_vcc' | 'crowd' | 'frs' {
+  const t = (type || '').toLowerCase();
+  if (
+    t.includes('face') ||
+    t.includes('watchlist') ||
+    t.includes('person_match') ||
+    t.includes('unknown_person')
+  ) {
+    return 'frs';
+  }
+  if (
+    t.includes('vehicle') ||
+    t.includes('car') ||
+    t.includes('truck') ||
+    t.includes('bus') ||
+    t.includes('plate') ||
+    t.includes('anpr') ||
+    t.includes('vcc') ||
+    t.includes('violation') ||
+    t.includes('speed')
+  ) {
+    return 'anpr_vcc';
+  }
+  return 'crowd';
+}
+
+function filterDetections(detections: Detection[], enabledServices: string[], serviceFilter: string): Detection[] {
+  if (!Array.isArray(detections) || detections.length === 0) return [];
+  const enabled = enabledServices.length > 0 ? new Set(enabledServices) : null;
+  return detections.filter((det) => {
+    const svc = detectionService(det.type);
+    if (enabled && !enabled.has(svc)) return false;
+    if (serviceFilter && serviceFilter !== 'all' && serviceFilter !== svc) return false;
+    return true;
+  });
+}
+
+// Draw detection bounding boxes and labels
+function drawDetections(
+  ctx: CanvasRenderingContext2D,
+  detections: Detection[],
+  _width: number,
+  _height: number
+) {
+  detections.forEach((det) => {
+    if (!det.bbox) return;
+    
+    const [x, y, w, h] = det.bbox;
+    const color = det.color || getColorForType(det.type);
+    
+    // Draw box
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+    
+    // Draw label background
+    const label = det.label || `${det.type} ${Math.round(det.confidence * 100)}%`;
+    ctx.font = '12px sans-serif';
+    const textWidth = ctx.measureText(label).width;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y - 18, textWidth + 8, 18);
+    
+    // Draw label text
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, x + 4, y - 5);
+  });
+}
+
+// Get color for detection type
+function getColorForType(type: string): string {
+  const colors: Record<string, string> = {
+    person: '#22c55e',
+    vehicle: '#3b82f6',
+    car: '#3b82f6',
+    truck: '#8b5cf6',
+    bus: '#f59e0b',
+    motorcycle: '#ec4899',
+    bicycle: '#14b8a6',
+    plate: '#ef4444',
+    face: '#f97316',
+    default: '#6b7280',
+  };
+  return colors[type.toLowerCase()] || colors.default;
+}
+
+export default WebSocketVideoFrame;

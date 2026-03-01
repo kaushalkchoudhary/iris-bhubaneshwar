@@ -1,0 +1,20 @@
+[Unit]
+Description=IRIS Edge Gateway (Jetson)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=-/etc/iris-edge/edge.env
+ExecStart=/opt/iris-edge/bin/iris-edge-gateway
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

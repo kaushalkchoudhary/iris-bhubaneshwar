@@ -1,0 +1,35 @@
+# Crowd Analytics Pipeline Configuration
+# Edit rtsp_url to point to your RTSP camera or video file
+# Model weights are in the models/ directory
+
+api_base_url: ""
+api_token: ""
+
+rtsp_sources:
+  - name: cam_1
+    camera_id: demo-crowd
+    location_id: local
+    rtsp_url: file:///home/ubuntu/iris2/output4.mp4
+    model_size: crowd-counting-8hvzc-pvx6p-1.pt   # use models/crowd-counting-8hvzc-pvx6p-1.pt
+    confidence: 0.1
+    fps: 5
+    skip_frames: 2
+    rtsp_transport: tcp
+    buffer_size: 1
+    interval: 5
+    api_base_url: http://localhost:3002/api
+    api_token: ""
+
+  - name: cam_2
+    camera_id: demo-crowd-2
+    location_id: local
+    rtsp_url: file:///home/ubuntu/iris2/output18.mp4
+    model_size: crowd-counting-8hvzc-pvx6p-1.pt
+    confidence: 0.1
+    fps: 5
+    skip_frames: 2
+    rtsp_transport: tcp
+    buffer_size: 1
+    interval: 5
+    api_base_url: http://localhost:3002/api
+    api_token: ""

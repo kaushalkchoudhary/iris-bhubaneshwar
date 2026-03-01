@@ -1,0 +1,8 @@
+# Unified requirements for all inference services.
+# Install from inference-backend/ with:
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements.txt
+
+-r ANPR-VCC_analytics/requirements.txt
+-r crowd-analytics/requirements.txt
+-r frs-analytics/requirements.txt

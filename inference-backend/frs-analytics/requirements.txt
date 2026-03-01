@@ -1,0 +1,13 @@
+# FRS Analytics Pipeline Requirements
+PyJWT
+opencv-python
+insightface
+onnxruntime-gpu; platform_system == "Linux" and platform_machine == "x86_64"
+onnxruntime; platform_system != "Linux" or platform_machine == "aarch64"
+torch
+python-socketio[client]
+PyYAML
+numpy
+requests
+Pillow
+psutil

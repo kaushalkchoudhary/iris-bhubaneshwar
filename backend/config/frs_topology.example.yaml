@@ -1,0 +1,215 @@
+# FRS topology template: 5 Jetsons x 4 cameras each.
+# Copy to backend/config/frs_topology.yaml and replace rtsp_url values.
+
+jetsons:
+  - id: jetson_1
+    name: Jetson Orin Nano 1
+    ip: 10.10.10.11
+    mac: "02:00:00:00:01:11"
+    model: Jetson Orin Nano
+    zone_id: zone_north_1
+    cameras:
+      - camera_id: cam_01
+        name: North Gate 01
+        rtsp_url: rtsp://user:pass@10.20.1.11:554/stream1
+        zone_id: zone_north_1
+        lat: 12.9710
+        lng: 77.5930
+        services: [frs]
+        analytic_config:
+          jetson_id: jetson_1
+          skip_frames: 6
+          match_threshold: 0.35
+      - camera_id: cam_02
+        name: North Gate 02
+        rtsp_url: rtsp://user:pass@10.20.1.12:554/stream1
+        zone_id: zone_north_1
+        lat: 12.9712
+        lng: 77.5932
+        services: [frs]
+        analytic_config:
+          jetson_id: jetson_1
+          skip_frames: 6
+          match_threshold: 0.35
+      - camera_id: cam_03
+        name: North Gate 03
+        rtsp_url: rtsp://user:pass@10.20.1.13:554/stream1
+        zone_id: zone_north_1
+        lat: 12.9714
+        lng: 77.5934
+        services: [frs]
+        analytic_config:
+          jetson_id: jetson_1
+          skip_frames: 6
+          match_threshold: 0.35
+      - camera_id: cam_04
+        name: North Gate 04
+        rtsp_url: rtsp://user:pass@10.20.1.14:554/stream1
+        zone_id: zone_north_1
+        lat: 12.9716
+        lng: 77.5936
+        services: [frs]
+        analytic_config:
+          jetson_id: jetson_1
+          skip_frames: 6
+          match_threshold: 0.35
+
+  - id: jetson_2
+    name: Jetson Orin Nano 2
+    ip: 10.10.10.12
+    mac: "02:00:00:00:01:12"
+    model: Jetson Orin Nano
+    zone_id: zone_north_2
+    cameras:
+      - camera_id: cam_05
+        name: East Road 01
+        rtsp_url: rtsp://user:pass@10.20.2.11:554/stream1
+        zone_id: zone_north_2
+        lat: 12.9720
+        lng: 77.5940
+        services: [frs]
+        analytic_config: { jetson_id: jetson_2, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_06
+        name: East Road 02
+        rtsp_url: rtsp://user:pass@10.20.2.12:554/stream1
+        zone_id: zone_north_2
+        lat: 12.9722
+        lng: 77.5942
+        services: [frs]
+        analytic_config: { jetson_id: jetson_2, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_07
+        name: East Road 03
+        rtsp_url: rtsp://user:pass@10.20.2.13:554/stream1
+        zone_id: zone_north_2
+        lat: 12.9724
+        lng: 77.5944
+        services: [frs]
+        analytic_config: { jetson_id: jetson_2, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_08
+        name: East Road 04
+        rtsp_url: rtsp://user:pass@10.20.2.14:554/stream1
+        zone_id: zone_north_2
+        lat: 12.9726
+        lng: 77.5946
+        services: [frs]
+        analytic_config: { jetson_id: jetson_2, skip_frames: 6, match_threshold: 0.35 }
+
+  - id: jetson_3
+    name: Jetson Orin Nano 3
+    ip: 10.10.10.13
+    mac: "02:00:00:00:01:13"
+    model: Jetson Orin Nano
+    zone_id: zone_south_1
+    cameras:
+      - camera_id: cam_09
+        name: South Circle 01
+        rtsp_url: rtsp://user:pass@10.20.3.11:554/stream1
+        zone_id: zone_south_1
+        lat: 12.9680
+        lng: 77.5910
+        services: [frs]
+        analytic_config: { jetson_id: jetson_3, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_10
+        name: South Circle 02
+        rtsp_url: rtsp://user:pass@10.20.3.12:554/stream1
+        zone_id: zone_south_1
+        lat: 12.9682
+        lng: 77.5912
+        services: [frs]
+        analytic_config: { jetson_id: jetson_3, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_11
+        name: South Circle 03
+        rtsp_url: rtsp://user:pass@10.20.3.13:554/stream1
+        zone_id: zone_south_1
+        lat: 12.9684
+        lng: 77.5914
+        services: [frs]
+        analytic_config: { jetson_id: jetson_3, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_12
+        name: South Circle 04
+        rtsp_url: rtsp://user:pass@10.20.3.14:554/stream1
+        zone_id: zone_south_1
+        lat: 12.9686
+        lng: 77.5916
+        services: [frs]
+        analytic_config: { jetson_id: jetson_3, skip_frames: 6, match_threshold: 0.35 }
+
+  - id: jetson_4
+    name: Jetson Orin Nano 4
+    ip: 10.10.10.14
+    mac: "02:00:00:00:01:14"
+    model: Jetson Orin Nano
+    zone_id: zone_south_2
+    cameras:
+      - camera_id: cam_13
+        name: West Junction 01
+        rtsp_url: rtsp://user:pass@10.20.4.11:554/stream1
+        zone_id: zone_south_2
+        lat: 12.9670
+        lng: 77.5890
+        services: [frs]
+        analytic_config: { jetson_id: jetson_4, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_14
+        name: West Junction 02
+        rtsp_url: rtsp://user:pass@10.20.4.12:554/stream1
+        zone_id: zone_south_2
+        lat: 12.9672
+        lng: 77.5892
+        services: [frs]
+        analytic_config: { jetson_id: jetson_4, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_15
+        name: West Junction 03
+        rtsp_url: rtsp://user:pass@10.20.4.13:554/stream1
+        zone_id: zone_south_2
+        lat: 12.9674
+        lng: 77.5894
+        services: [frs]
+        analytic_config: { jetson_id: jetson_4, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_16
+        name: West Junction 04
+        rtsp_url: rtsp://user:pass@10.20.4.14:554/stream1
+        zone_id: zone_south_2
+        lat: 12.9676
+        lng: 77.5896
+        services: [frs]
+        analytic_config: { jetson_id: jetson_4, skip_frames: 6, match_threshold: 0.35 }
+
+  - id: jetson_5
+    name: Jetson Orin Nano 5
+    ip: 10.10.10.15
+    mac: "02:00:00:00:01:15"
+    model: Jetson Orin Nano
+    zone_id: zone_central
+    cameras:
+      - camera_id: cam_17
+        name: Central Plaza 01
+        rtsp_url: rtsp://user:pass@10.20.5.11:554/stream1
+        zone_id: zone_central
+        lat: 12.9700
+        lng: 77.5920
+        services: [frs]
+        analytic_config: { jetson_id: jetson_5, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_18
+        name: Central Plaza 02
+        rtsp_url: rtsp://user:pass@10.20.5.12:554/stream1
+        zone_id: zone_central
+        lat: 12.9702
+        lng: 77.5922
+        services: [frs]
+        analytic_config: { jetson_id: jetson_5, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_19
+        name: Central Plaza 03
+        rtsp_url: rtsp://user:pass@10.20.5.13:554/stream1
+        zone_id: zone_central
+        lat: 12.9704
+        lng: 77.5924
+        services: [frs]
+        analytic_config: { jetson_id: jetson_5, skip_frames: 6, match_threshold: 0.35 }
+      - camera_id: cam_20
+        name: Central Plaza 04
+        rtsp_url: rtsp://user:pass@10.20.5.14:554/stream1
+        zone_id: zone_central
+        lat: 12.9706
+        lng: 77.5926
+        services: [frs]
+        analytic_config: { jetson_id: jetson_5, skip_frames: 6, match_threshold: 0.35 }
