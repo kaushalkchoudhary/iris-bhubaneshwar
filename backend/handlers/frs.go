@@ -11,12 +11,40 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/irisdrone/backend/database"
 	"github.com/irisdrone/backend/models"
 )
+
+// watchlistVersion is bumped whenever the FRS person list changes so Jetsons
+// can detect stale caches with a cheap polling endpoint instead of refetching
+// the full person list every time.
+var (
+	watchlistVersionMu sync.RWMutex
+	watchlistVersion   int64
+	watchlistUpdatedAt time.Time
+)
+
+func bumpWatchlistVersion() {
+	watchlistVersionMu.Lock()
+	watchlistVersion++
+	watchlistUpdatedAt = time.Now().UTC()
+	watchlistVersionMu.Unlock()
+}
+
+// GetFRSWatchlistVersion returns the current watchlist version counter.
+// Jetsons poll this every few seconds and only do a full person-list fetch
+// when the version changes.
+// GET /api/inference/frs/watchlist-version (no auth required)
+func GetFRSWatchlistVersion(c *gin.Context) {
+	watchlistVersionMu.RLock()
+	v, t := watchlistVersion, watchlistUpdatedAt
+	watchlistVersionMu.RUnlock()
+	c.JSON(http.StatusOK, gin.H{"version": v, "updated_at": t.Format(time.RFC3339)})
+}
 
 // frsEmbeddingPython returns the Python binary to use for face embedding computation.
 func frsEmbeddingPython() string {
@@ -35,8 +63,14 @@ func frsEmbeddingPython() string {
 
 // frsEmbeddingScript returns the path to the get_face_embedding.py script.
 func frsEmbeddingScript() string {
-	// Relative to this binary's location or repo root
+	exePath, _ := os.Executable()
+
 	candidates := []string{
+		// Relative to CWD — works when started from backend/ dir (start_all_services.sh)
+		"scripts/get_face_embedding.py",
+		// Relative to the compiled binary location
+		filepath.Join(filepath.Dir(exePath), "scripts", "get_face_embedding.py"),
+		// Ubuntu deployment paths (backward compat)
 		"/home/ubuntu/iris-sringeri/backend/scripts/get_face_embedding.py",
 		"/home/ubuntu/iris2/backend/scripts/get_face_embedding.py",
 	}
@@ -236,6 +270,7 @@ func CreateFRSPerson(c *gin.Context) {
 		return
 	}
 
+	bumpWatchlistVersion()
 	c.JSON(http.StatusOK, person)
 }
 
@@ -291,6 +326,7 @@ func UpdateFRSPerson(c *gin.Context) {
 		return
 	}
 
+	bumpWatchlistVersion()
 	c.JSON(http.StatusOK, person)
 }
 
@@ -301,6 +337,7 @@ func DeleteFRSPerson(c *gin.Context) {
 		return
 	}
 	_ = database.FRS().Model(&models.FRSDetection{}).Where("person_id = ?", id).Update("person_id", nil).Error
+	bumpWatchlistVersion()
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -373,6 +410,7 @@ func AddFRSPersonEmbeddings(c *gin.Context) {
 	}
 
 	total := len(embeddings)
+	bumpWatchlistVersion()
 	c.JSON(http.StatusOK, gin.H{
 		"person":             person,
 		"newEmbeddingsCount": newCount,

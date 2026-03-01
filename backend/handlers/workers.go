@@ -127,6 +127,27 @@ func pingWorkerIP(ip string, timeout time.Duration) (bool, int64, error) {
 	return false, 0, lastErr
 }
 
+// analyticsStrings extracts the analytics list from a JSONB field and always
+// returns a []string (never nil/null). This prevents Python inference workers
+// from receiving a JSON null and incorrectly filtering out all cameras.
+func analyticsStrings(j models.JSONB) []string {
+	out := []string{}
+	if j.Data == nil {
+		return out
+	}
+	switch v := j.Data.(type) {
+	case []string:
+		return v
+	case []interface{}:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
 // GetJetsonFleetStatus returns online/offline status for Jetsons declared in config.yml.
 // GET /api/workers/fleet-status
 func GetJetsonFleetStatus(c *gin.Context) {
@@ -616,7 +637,7 @@ func GetWorkerConfig(c *gin.Context) {
 			"device_id":  a.DeviceID,
 			"name":       a.Device.Name,
 			"rtsp_url":   a.Device.RTSPUrl,
-			"analytics":  a.Analytics,
+			"analytics":  analyticsStrings(a.Analytics),
 			"fps":        a.FPS,
 			"resolution": a.Resolution,
 		}
@@ -768,7 +789,7 @@ func GetWorkerDiscoveredCameras(c *gin.Context) {
 
 		// Add analytics if assigned
 		if a, ok := assignmentMap[d.ID]; ok {
-			cam["analytics"] = a.Analytics
+			cam["analytics"] = analyticsStrings(a.Analytics)
 			cam["fps"] = a.FPS
 			cam["resolution"] = a.Resolution
 			cam["is_active"] = a.IsActive

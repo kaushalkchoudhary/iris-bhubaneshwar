@@ -188,7 +188,9 @@ class AnalyticsConfigManager:
 
             sources = []
             for cam in cameras:
-                analytics_list = cam.get('analytics', [])
+                # Use `or []` to handle both missing key and explicit JSON null
+                # (backend serializes JSONB as null when analytics not set).
+                analytics_list = cam.get('analytics') or []
 
                 # Filter to cameras that carry the requested analytic
                 if analytic_short and analytic_short not in analytics_list:

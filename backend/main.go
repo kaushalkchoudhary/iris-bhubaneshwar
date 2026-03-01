@@ -299,6 +299,7 @@ func main() {
 		api.GET("/analytics/worker-configs", handlers.GetWorkerConfigs)
 		api.GET("/inference/focus", handlers.GetInferenceFocus)
 		api.GET("/inference/frs/persons", handlers.GetFRSPersonsForInference)
+		api.GET("/inference/frs/watchlist-version", handlers.GetFRSWatchlistVersion)
 		api.GET("/inference/crowd/analysis", handlers.GetCrowdAnalysis)
 		api.POST("/inference/crowd/analysis", handlers.PostCrowdAnalysisIngest)
 		api.POST("/inference/crowd/live-frame", handlers.PostCrowdLiveFrame)

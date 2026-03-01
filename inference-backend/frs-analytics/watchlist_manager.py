@@ -14,16 +14,56 @@ class WatchlistManager:
         self.token = api_config.get('token')
         self.persons: List[Dict] = []
         self.last_update = 0
-        self.update_interval = 60.0 # seconds
+        self.update_interval = 60.0  # seconds — full person-list refresh interval
         self.match_threshold = api_config.get('match_threshold', 0.30)  # Lowered for law enforcement use - reduces false negatives
+        # Fast version polling: check for watchlist changes every 5s without
+        # fetching the full person list each time.
+        self._version_poll_interval = 5.0
+        self._last_version_check = 0.0
+        self._last_known_version = -1
 
     def is_empty(self) -> bool:
         """Returns True if the watchlist is currently empty."""
         return len(self.persons) == 0
 
+    def _fetch_version(self) -> int:
+        """Fetch the current watchlist version counter from the backend.
+        Returns -1 on any error."""
+        try:
+            url = urljoin(self.base_url, '/api/inference/frs/watchlist-version')
+            headers = {'Authorization': f'Bearer {self.token}'} if self.token else {}
+            resp = requests.get(url, headers=headers, timeout=3)
+            if resp.status_code == 200:
+                return int(resp.json().get('version', -1))
+        except Exception:
+            pass
+        return -1
+
     def update(self):
-        """Update the watchlist from the API."""
-        if time.time() - self.last_update < self.update_interval and self.persons:
+        """Update the watchlist from the API.
+
+        Uses a two-tier approach:
+        1. Every 5s: cheap version check — only triggers a full fetch if the
+           backend version counter changed (i.e. someone enrolled/deleted a person).
+        2. Every 60s: forced full refresh as a fallback (in case version endpoint
+           is unavailable or version wraps).
+        """
+        now = time.time()
+
+        # Tier 1: fast version check (every 5 seconds)
+        if now - self._last_version_check >= self._version_poll_interval:
+            self._last_version_check = now
+            remote_version = self._fetch_version()
+            version_changed = remote_version != -1 and remote_version != self._last_known_version
+            if remote_version != -1:
+                self._last_known_version = remote_version
+            # If version is unchanged and we have persons and the 60s fallback
+            # hasn't expired, skip the full fetch.
+            if not version_changed and self.persons and (now - self.last_update < self.update_interval):
+                return
+            # Otherwise fall through to the full fetch below.
+        else:
+            # Not even time for a version check yet — nothing to do.
             return
 
         try:
