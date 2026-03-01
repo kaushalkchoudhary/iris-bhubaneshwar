@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Wifi, WifiOff, AlertCircle } from 'lucide-react';
+import { Camera, Wifi, WifiOff } from 'lucide-react';
 
 interface Detection {
   type: string;
@@ -166,53 +166,51 @@ export function WebSocketVideoFrame({
     serviceFilter: 'all',
   });
 
+  // Pending-frame state: at most one frame queued while decode is in progress.
+  // This ensures we always render the LATEST frame and never build a backlog.
+  const decodingRef = useRef(false);
+  const pendingFrameRef = useRef<ArrayBuffer | null>(null);
+
   useEffect(() => {
     overlayConfigRef.current = { showOverlays, enabledServices, serviceFilter };
   }, [showOverlays, enabledServices, serviceFilter]);
 
   const cameraKey = `${workerId}.${cameraId}`;
 
-  // Handle incoming data (frames or detections)
-  const handleData = useCallback((data: ArrayBuffer | Detection[]) => {
-    if (data instanceof ArrayBuffer) {
-      // Frame data
-      const blob = new Blob([data], { type: 'image/jpeg' });
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      
-      img.onload = () => {
+  // Decode the latest pending frame using createImageBitmap (faster than Image+URL).
+  // Recursively processes the next pending frame after each decode completes.
+  const processFrame = useCallback(() => {
+    const buf = pendingFrameRef.current;
+    if (!buf) {
+      decodingRef.current = false;
+      return;
+    }
+    pendingFrameRef.current = null;
+
+    createImageBitmap(new Blob([buf], { type: 'image/jpeg' }))
+      .then((bitmap) => {
         const canvas = canvasRef.current;
         if (canvas) {
           const ctx = canvas.getContext('2d');
           if (ctx) {
-            // Resize canvas to match image
-            if (canvas.width !== img.width || canvas.height !== img.height) {
-              canvas.width = img.width;
-              canvas.height = img.height;
+            if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+              canvas.width = bitmap.width;
+              canvas.height = bitmap.height;
             }
-            
-            // Draw frame
-            ctx.drawImage(img, 0, 0);
-            
-            const overlayCfg = overlayConfigRef.current;
-            const filtered = filterDetections(
-              detectionsRef.current,
-              overlayCfg.enabledServices,
-              overlayCfg.serviceFilter
-            );
-            if (overlayCfg.showOverlays && filtered.length > 0) {
-              drawDetections(ctx, filtered, img.width, img.height);
+            ctx.drawImage(bitmap, 0, 0);
+            const cfg = overlayConfigRef.current;
+            const filtered = filterDetections(detectionsRef.current, cfg.enabledServices, cfg.serviceFilter);
+            if (cfg.showOverlays && filtered.length > 0) {
+              drawDetections(ctx, filtered, bitmap.width, bitmap.height);
             }
           }
         }
-        URL.revokeObjectURL(url);
-        
-        // Update stats
+        bitmap.close();
+
         setLastFrameTime(Date.now());
         setConnected(true);
         setError(null);
-        
-        // Calculate FPS
+
         frameCountRef.current++;
         const now = Date.now();
         if (now - lastFpsUpdateRef.current >= 1000) {
@@ -220,14 +218,25 @@ export function WebSocketVideoFrame({
           frameCountRef.current = 0;
           lastFpsUpdateRef.current = now;
         }
-      };
-      
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
+
+        // Process the next queued frame (if a newer one arrived while decoding).
+        processFrame();
+      })
+      .catch(() => {
         setError('Failed to decode frame');
-      };
-      
-      img.src = url;
+        decodingRef.current = false;
+      });
+  }, []); // refs only — no stale-closure risk
+
+  // Handle incoming data (frames or detections)
+  const handleData = useCallback((data: ArrayBuffer | Detection[]) => {
+    if (data instanceof ArrayBuffer) {
+      // Always keep only the latest pending frame; skip if busy decoding.
+      pendingFrameRef.current = data;
+      if (!decodingRef.current) {
+        decodingRef.current = true;
+        processFrame();
+      }
     } else {
       // Detection data - can be array or object with detections property
       if (Array.isArray(data)) {
@@ -241,7 +250,7 @@ export function WebSocketVideoFrame({
         setDetections(next);
       }
     }
-  }, []);
+  }, [processFrame]);
 
   // Subscribe/unsubscribe on mount/unmount
   useEffect(() => {

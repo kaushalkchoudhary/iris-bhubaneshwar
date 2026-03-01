@@ -152,7 +152,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-crowd-flow", action="store_true", default=False)
     p.add_argument("--no-frs", action="store_true")
     p.add_argument("--frs-local-only", action="store_true", help="Run FRS with local-only config source")
-    p.add_argument("--max-restarts", type=int, default=2, help="Max restarts per service on unexpected exit")
+    p.add_argument("--max-restarts", type=int, default=10, help="Max restarts per service on unexpected exit")
     p.add_argument("--single-log", action="store_true", help="Write all inference logs into one combined file")
     p.add_argument(
         "--combined-log-file",
@@ -270,8 +270,8 @@ def main() -> int:
                     continue
 
                 if restart_counts[name] >= args.max_restarts:
-                    logger.error("%s exited with code %s and restart limit reached.", name, code)
-                    stop_event.set()
+                    logger.error("%s exited with code %s and restart limit reached — removing service (others continue).", name, code)
+                    del procs[name]
                     break
 
                 restart_counts[name] += 1

@@ -42,6 +42,8 @@ def api_reporter(
 
     base_url = api_config.get('base_url')
     token = api_config.get('token')
+    # When True, only matched (known) faces are uploaded; unknown faces are discarded.
+    only_watchlist_matches = bool(api_config.get('only_watchlist_matches', True))
     headers = {}
     if token:
         headers['Authorization'] = f'Bearer {token}'
@@ -126,6 +128,11 @@ def api_reporter(
                 if normalized_confidence < confidence_threshold:
                     continue
 
+                det_score = face.get('det_score')
+                if det_score is not None and float(det_score) < 0.65:
+                    logger.debug(f"[{camera_id}] Skipping face due to low det_score: {det_score:.2f}")
+                    continue
+
                 should_report, best_face_data, reason = duplicate_tracker.should_report_face(
                     face_data=face,
                     camera_id=camera_id
@@ -139,42 +146,77 @@ def api_reporter(
 
                 face_to_report = best_face_data or face
 
+                matched_person = None
+                match_score = 0.0
+                is_known = False
+                has_weak_match = False
+                max_similarity = 0.0
+                weak_match_person = None
+
+                if embedding:
+                    matched_person, match_score = watchlist_manager.match(embedding)
+                    if matched_person:
+                        is_known = True
+                    else:
+                        for person in watchlist_manager.persons:
+                            if 'embedding_np' not in person:
+                                continue
+                            source_emb = person['embedding_np']
+                            target_emb = np.array(embedding, dtype=np.float32)
+                            source_norm = np.linalg.norm(source_emb)
+                            target_norm = np.linalg.norm(target_emb)
+                            if source_norm == 0 or target_norm == 0:
+                                continue
+                            similarity = float(np.dot(target_emb, source_emb) / (target_norm * source_norm))
+                            if similarity > max_similarity:
+                                max_similarity = similarity
+                                weak_match_person = person
+                            if similarity > 0.25:
+                                has_weak_match = True
+
+                if not is_known and only_watchlist_matches:
+                    logger.debug(f"[{camera_id}] Unknown face skipped (only_watchlist_matches=True)")
+                    continue
+
+                if not is_known and has_weak_match:
+                    logger.debug(f"[{camera_id}] Weak match to {weak_match_person.get('name') if weak_match_person else 'unknown'} ({max_similarity:.3f}) - skipping")
+                    stats['total_duplicates'] += 1
+                    stats['camera_stats'][camera_id]['duplicates'] += 1
+                    continue
+
                 x1, y1, x2, y2 = map(int, face_to_report['bbox'])
                 face_crop_img = frame[y1:y2, x1:x2]
+
+                # Create a copy of the frame to draw bbox
+                frame_to_encode = frame.copy()
+
+                # Draw bounding box for both known and unknown faces on the full frame
+                color = (0, 255, 0) if is_known else (0, 165, 255)  # Green for known, Orange for unknown
+                cv2.rectangle(frame_to_encode, (x1, y1), (x2, y2), color, 6)
 
                 if face_crop_img is None or face_crop_img.size == 0:
                     logger.warning(f"[{camera_id}] Empty face crop for bbox {face_to_report['bbox']}; sending full frame only.")
                     face_crop_img = None
 
+                if not is_known:
+                    # Do not send zoomed face for unknown
+                    face_crop_img = None
+
                 jpeg_quality = api_config.get('jpeg_quality', 75)
                 encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
 
-                frame_to_encode = frame
                 resize_height = api_config.get('full_frame_resize_height')
-                scale_x_ratio = 1.0
-                scale_y_ratio = 1.0
 
                 if resize_height and isinstance(resize_height, int):
                     try:
-                        h, w = frame.shape[:2]
+                        h, w = frame_to_encode.shape[:2]
                         new_w = int((resize_height / h) * w)
-                        scale_x_ratio = new_w / w
-                        scale_y_ratio = resize_height / h
-                        frame_to_encode = cv2.resize(frame, (new_w, resize_height), interpolation=cv2.INTER_AREA)
+                        frame_to_encode = cv2.resize(frame_to_encode, (new_w, resize_height), interpolation=cv2.INTER_AREA)
                     except Exception as e:
                         logger.warning(f"[{camera_id}] Failed to resize frame: {e}")
 
                 _, frame_encoded = cv2.imencode('.jpg', frame_to_encode, encode_params)
 
-                raw_bbox = face_to_report['bbox']
-                annotated_frame = frame_to_encode.copy()
-                bx1 = int(round(raw_bbox[0] * scale_x_ratio))
-                by1 = int(round(raw_bbox[1] * scale_y_ratio))
-                bx2 = int(round(raw_bbox[2] * scale_x_ratio))
-                by2 = int(round(raw_bbox[3] * scale_y_ratio))
-                cv2.rectangle(annotated_frame, (bx1, by1), (bx2, by2), (0, 255, 0), 2)
-
-                _, face_img_encoded = cv2.imencode('.jpg', annotated_frame, encode_params)
                 face_crop_encoded = None
                 if face_crop_img is not None:
                     _, face_crop_encoded = cv2.imencode('.jpg', face_crop_img, encode_params)
@@ -209,9 +251,7 @@ def api_reporter(
                     embedding_bytes = embedding_array.tobytes()
                     event_payload['data']['faceEmbedding'] = base64.b64encode(embedding_bytes).decode('utf-8')
 
-                    matched_person, match_score = watchlist_manager.match(embedding)
-
-                    if matched_person:
+                    if is_known:
                         event_payload['type'] = 'person_match'
                         event_payload['data']['person_id'] = matched_person.get('id')
                         event_payload['data']['person_name'] = matched_person.get('name')
@@ -225,32 +265,6 @@ def api_reporter(
                         event_payload['data']['metadata']['match_score'] = match_score
                         event_payload['data']['metadata']['person_category'] = matched_person.get('category', 'unknown')
                     else:
-                        has_weak_match = False
-                        max_similarity = 0.0
-                        weak_match_person = None
-
-                        for person in watchlist_manager.persons:
-                            if 'embedding_np' not in person:
-                                continue
-                            source_emb = person['embedding_np']
-                            target_emb = np.array(embedding, dtype=np.float32)
-                            source_norm = np.linalg.norm(source_emb)
-                            target_norm = np.linalg.norm(target_emb)
-                            if source_norm == 0 or target_norm == 0:
-                                continue
-                            similarity = float(np.dot(target_emb, source_emb) / (target_norm * source_norm))
-                            if similarity > max_similarity:
-                                max_similarity = similarity
-                                weak_match_person = person
-                            if similarity > 0.25:
-                                has_weak_match = True
-
-                        if has_weak_match:
-                            logger.debug(f"[{camera_id}] Weak match to {weak_match_person.get('name') if weak_match_person else 'unknown'} ({max_similarity:.3f}) - skipping")
-                            stats['total_duplicates'] += 1
-                            stats['camera_stats'][camera_id]['duplicates'] += 1
-                            continue
-
                         unknown_confidence = 1.0 - max_similarity
                         event_payload['data']['metadata']['is_known'] = False
                         event_payload['data']['metadata']['match_score'] = 0.0
@@ -261,7 +275,6 @@ def api_reporter(
 
                 data = {'event': json.dumps(event_payload)}
                 files = {
-                    'face.jpg': ('face.jpg', face_img_encoded.tobytes(), 'image/jpeg'),
                     'frame.jpg': ('frame.jpg', frame_encoded.tobytes(), 'image/jpeg')
                 }
                 if face_crop_encoded is not None:

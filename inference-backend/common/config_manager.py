@@ -207,6 +207,7 @@ class AnalyticsConfigManager:
                     'rtsp_url':            rtsp,
                     # Worker config has no location object — use device_id as stand-in
                     'location_id':         cam['device_id'],
+                    'assignment_id':       cam.get('assignment_id'),
                     'fps':                 cam.get('fps', 15),
                     'interval':            5,
                     'confidence':          0.2,
@@ -215,7 +216,7 @@ class AnalyticsConfigManager:
                     'buffer_size':         10,
                     'model_size':          'yolov8s.pt',
                     'line_position':       0.5,
-                    'analytic_config':     {},
+                    'analytic_config':     cam.get('analytic_config', {}),
                     # API credentials forwarded so pipeline threads can post results
                     'api_base_url':        self.base_url,
                     'api_token':           self.token,

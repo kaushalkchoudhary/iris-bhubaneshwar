@@ -179,7 +179,9 @@ class LivePreviewWebSocketClient:
     # ── public API ─────────────────────────────────────────────────────────
 
     def send_frame(self, frame: np.ndarray, detections: Optional[List[Dict]] = None, metadata: Optional[Dict] = None):
-        """Compress and send a JPEG frame (with optional face boxes) to the backend."""
+        """Compress and send a raw JPEG frame to the backend (no bbox drawing).
+        If detections are provided, a scaled 0x02 detection JSON is also sent so
+        the frontend can overlay bounding boxes without any server-side drawing."""
         now = time.time()
         if now - self.last_frame_time < self.min_frame_interval:
             return
@@ -190,12 +192,11 @@ class LivePreviewWebSocketClient:
             orig_h, orig_w = frame.shape[:2]
             resized = self._resize(frame)
             res_h, res_w = resized.shape[:2]
+            # Scale factors used only for bbox coordinate conversion (no drawing).
             sx = res_w / orig_w
             sy = res_h / orig_h
 
-            if detections:
-                resized = self._draw_boxes(resized, detections, sx, sy)
-
+            # No bbox drawing — send the raw (possibly downscaled) JPEG.
             jpeg = self._encode_jpeg(resized)
             if jpeg is None:
                 return
@@ -203,7 +204,7 @@ class LivePreviewWebSocketClient:
             if self._send_binary(0x01, jpeg):
                 self.last_frame_time = now
 
-                # Also publish detection JSON if faces present
+                # Send detection overlay data so the frontend can draw boxes itself.
                 if detections:
                     det_payload = json.dumps({
                         "camera_id": self.camera_id,
@@ -303,10 +304,12 @@ class LivePreviewWebSocketClient:
 def create_live_preview_client(
     camera_id: str,
     server_url: str = "http://localhost:3002",
-    max_fps: int = 5,
+    max_fps: int = 30,
+    frame_resize_height: int = 720,
 ) -> LivePreviewWebSocketClient:
     return LivePreviewWebSocketClient(
         server_url=server_url,
         camera_id=camera_id,
         max_fps=max_fps,
+        frame_resize_height=frame_resize_height,
     )

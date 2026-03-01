@@ -6,7 +6,7 @@ interface FRSDetection {
   personId?: string;
   deviceId: string;
   timestamp: string;
-  metadata: any;
+  metadata?: any;
   person?: Person;
 }
 

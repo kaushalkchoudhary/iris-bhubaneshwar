@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { apiClient, type Device } from '@/lib/api';
 import {
   Camera, ChevronDown, ChevronRight, LayoutGrid,
@@ -46,7 +46,7 @@ export function CameraView() {
   const { gridSize, setUsedSlots } = useCameraGrid();
   const [cameras, setCameras] = useState<Device[]>([]);
   const [workers, setWorkers] = useState<WorkerInfo[]>([]);
-  const [fullscreenStates, setFullscreenStates] = useState<Record<number, boolean>>({});
+  const [fullscreenStates, _setFullscreenStates] = useState<Record<number, boolean>>({});
   const [expandedWorkers, setExpandedWorkers] = useState<Set<string>>(new Set());
   const [gridSlots, setGridSlots] = useState<GridSlot[]>([]);
   const [draggedDevice, setDraggedDevice] = useState<Device | null>(null);

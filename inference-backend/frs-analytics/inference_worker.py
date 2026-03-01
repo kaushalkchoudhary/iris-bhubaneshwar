@@ -57,30 +57,32 @@ def inference_worker(
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
-    # Initialize the InsightFace model
+    # Initialize the InsightFace model.
+    # Always list CUDAExecutionProvider first — ONNX Runtime falls back to CPU
+    # automatically if CUDA is not available, without needing torch.cuda.
     logger.info("Initializing InsightFace model...")
     try:
-        if device.startswith('cuda'):
-            if ':' in device:
-                gpu_id = int(device.split(':')[1])
-            else:
-                gpu_id = 0
-            ctx_id = gpu_id if torch.cuda.is_available() else -1
-        else:
-            ctx_id = -1
-
-        if ctx_id == -1:
-            logger.warning("CUDA not available, running on CPU. This will be slow.")
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        # ctx_id=0 → GPU 0; ONNX Runtime gracefully falls back to CPU if unavailable.
+        ctx_id = 0 if device.startswith('cuda') else -1
 
         model = insightface.app.FaceAnalysis(
             allowed_modules=['detection', 'recognition', 'genderage'],
-            providers=['CUDAExecutionProvider' if ctx_id >= 0 else 'CPUExecutionProvider']
+            providers=providers,
         )
         if det_thresh is not None:
             model.prepare(ctx_id=ctx_id, det_size=det_size, det_thresh=float(det_thresh))
         else:
             model.prepare(ctx_id=ctx_id, det_size=det_size)
-        logger.info(f"InsightFace model loaded successfully on {'GPU ' + str(ctx_id) if ctx_id >= 0 else 'CPU'}.")
+
+        # Report which providers are actually active after prepare().
+        try:
+            import onnxruntime as _ort
+            active = _ort.get_available_providers()
+            using_gpu = 'CUDAExecutionProvider' in active
+            logger.info(f"InsightFace model loaded — active providers: {active} | GPU: {using_gpu}")
+        except Exception:
+            logger.info(f"InsightFace model loaded successfully (ctx_id={ctx_id}).")
     except Exception as e:
         logger.error(f"Fatal error initializing model: {e}", exc_info=True)
         return

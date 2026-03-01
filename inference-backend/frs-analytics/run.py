@@ -100,24 +100,36 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         logger = logging.getLogger(f'frs_worker_{camera_config.get("camera_id", "unknown")[:8]}')
         logger.info(f"FRS worker started for {camera_config.get('camera_id', 'unknown')}")
 
-        # GPU selection
-        if torch.cuda.is_available():
-            gpu_count = torch.cuda.device_count()
-            worker_gpu = hash(camera_config['camera_id']) % gpu_count if gpu_count > 0 else 0
-            device = f'cuda:{worker_gpu}'
-            logger.info(f"Using GPU {worker_gpu} for camera {camera_config['name']}")
-        else:
+        # GPU selection — prefer CUDAExecutionProvider via onnxruntime (works even
+        # if torch is CPU-only, as InsightFace uses ONNX Runtime directly).
+        try:
+            import onnxruntime as _ort
+            _avail = _ort.get_available_providers()
+            if 'CUDAExecutionProvider' in _avail:
+                device = 'cuda:0'
+                logger.info(f"Using GPU (CUDAExecutionProvider) for camera {camera_config['name']}")
+            else:
+                device = 'cpu'
+                logger.info(f"GPU not available (ort providers: {_avail}), using CPU for {camera_config['name']}")
+        except Exception as _e:
             device = 'cpu'
-            logger.info(f"Using CPU for camera {camera_config['name']}")
+            logger.warning(f"Could not query onnxruntime providers ({_e}), using CPU for {camera_config['name']}")
 
-        # Internal thread queues
-        frames_queue: ThreadQueue = ThreadQueue(maxsize=100)
+        # Internal thread queues — keep small to avoid accumulating large frames in RAM.
+        # Each frame is ~6 MB (1080p numpy array); 10 slots = ~60 MB per queue.
+        frames_queue: ThreadQueue = ThreadQueue(maxsize=10)
         # Inference output is fanned out so API reporting and live preview both receive every result.
-        results_queue: ThreadQueue = ThreadQueue(maxsize=100)
-        reporter_queue: ThreadQueue = ThreadQueue(maxsize=100)
-        preview_queue: ThreadQueue = ThreadQueue(maxsize=100)
-        # Raw frames queue — receives every frame from FrameGrabber, bypasses frame_skip
-        raw_frames_queue: ThreadQueue = ThreadQueue(maxsize=10)
+        results_queue: ThreadQueue = ThreadQueue(maxsize=10)
+        # Reporter queue slightly larger — HTTP requests can be slow; allows ~4s backlog at 5 fps.
+        reporter_queue: ThreadQueue = ThreadQueue(maxsize=20)
+        preview_queue: ThreadQueue = ThreadQueue(maxsize=10)
+        # Raw frames queue — receives every frame from FrameGrabber, bypasses frame_skip.
+        # Small maxsize=2 so we always drain to the LATEST frame (stale frames are dropped
+        # by FrameGrabber's put_nowait when full).
+        raw_frames_queue: ThreadQueue = ThreadQueue(maxsize=2)
+        # Shared state: latest face detections for drawing bbox overlay on raw frames.
+        _detection_state: dict = {'faces': [], 'ts': 0.0}
+        _detection_lock = threading.Lock()
         input_queues = [frames_queue]
 
         # Per-camera analytic config helper
@@ -134,7 +146,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         inference_config = {
             'device': device,
             'det_size': cfg('det_size', [640, 640]),
-            'det_thresh': cfg('det_thresh', None),
+            'det_thresh': cfg('det_thresh', 0.65),
             'use_letterbox': cfg('use_letterbox', True),
             'batch_size': cfg('batch_size', 10),
             'batch_timeout': cfg('batch_timeout', 0.5),
@@ -145,16 +157,16 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         api_config = {
             'base_url': camera_config.get('api_base_url', 'http://localhost:3002/api'),
             'token': camera_config.get('api_token'),
-            'confidence_threshold': cfg('confidence_threshold', 0.3),
+            'confidence_threshold': cfg('confidence_threshold', 0.6),
             'face_area_threshold': cfg('face_area_threshold', 1024),
             'jpeg_quality': cfg('jpeg_quality', 90),
             'full_frame_resize_height': cfg('full_frame_resize_height', 1080),
             'similarity_threshold': cfg('similarity_threshold', 0.65),
             'duplicate_short_window': cfg('duplicate_short_window', 30.0),
             'duplicate_long_window': cfg('duplicate_long_window', 300.0),
-            'max_tracked_faces': cfg('max_tracked_faces', 1000),
+            'max_tracked_faces': cfg('max_tracked_faces', 200),
             'match_threshold': cfg('match_threshold', 0.35),
-            'only_watchlist_matches': cfg('only_watchlist_matches', True)
+            'only_watchlist_matches': cfg('only_watchlist_matches', False)
         }
 
         # Watchlist manager (shared between inference + reporter)
@@ -166,19 +178,22 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
                     watchlist_manager.update()
                 except Exception as e:
                     logger.debug(f"Watchlist update error: {e}")
-                time.sleep(watchlist_manager.update_interval)
+                # update() internally rate-limits: version check every 5s, full fetch on change.
+                # Sleep 1s here so we call it frequently enough to honour that 5s cadence.
+                stop_event.wait(1.0)
 
         threading.Thread(target=watchlist_updater, daemon=True, name="WatchlistUpdater").start()
 
         # Single WebSocket client per camera:
-        # - raw frames (0x01) sent at up to 25 FPS via raw_stream_sender thread
-        # - detection JSON (0x02) sent at inference rate via detection_sender_worker thread
-        # Both share one connection to halve publisher WebSocket count on the backend.
+        # - raw frames (0x01) at up to 30 FPS via raw_stream_sender (with bbox overlay when detected)
+        # - detection JSON (0x02) at inference rate via detection_sender_worker
+        # Both share one connection.
         websocket_server_url = camera_config.get('websocket_server_url', 'http://localhost:3002')
         preview_client = create_live_preview_client(
             camera_id=camera_config['camera_id'],
             server_url=websocket_server_url,
-            max_fps=25,
+            max_fps=30,
+            frame_resize_height=240,
         )
 
         # Camera configs for API reporter
@@ -238,22 +253,54 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         reporter_thread.start()
         logger.info(f"Started API reporter thread for {camera_config['name']}")
 
-        # Thread 1: Raw stream sender — sends clean JPEG frames at up to 25 FPS
+        # Thread 1: Raw stream sender — sends raw JPEG frames at up to 30 FPS.
+        # Always drains to the LATEST frame (stale frames are discarded).
+        # No CV processing on the JPEG — bbox coords are sent as 0x02 JSON so
+        # the frontend can draw overlays itself.
         def raw_stream_sender():
+            from queue import Empty as _Empty
+            import time as _t
+            frame_interval = 1.0 / 30  # 33.3 ms per frame
+            next_send = _t.monotonic()
             try:
                 while not stop_event.is_set():
+                    now = _t.monotonic()
+                    wait = next_send - now
+                    if wait > 0.002:
+                        # Sleep in small steps so stop_event is checked regularly.
+                        stop_event.wait(min(wait, 0.010))
+                        continue
+
+                    # Drain queue: keep only the most recent frame.
+                    latest = None
                     try:
-                        _cam_id, frame = raw_frames_queue.get(timeout=1.0)
-                        preview_client.send_frame(frame, detections=None)
-                    except Exception:
+                        latest = raw_frames_queue.get_nowait()
+                        while True:
+                            try:
+                                latest = raw_frames_queue.get_nowait()
+                            except _Empty:
+                                break
+                    except _Empty:
                         pass
+
+                    if latest is not None:
+                        _cam_id, frame = latest
+                        # We don't want bbox overlay on live feed to save frontend compute and because of FPS mismatch.
+                        preview_client.send_frame(frame, detections=None)
+                        next_send = _t.monotonic() + frame_interval
+                    else:
+                        # No frame available yet — retry in 5 ms.
+                        next_send = _t.monotonic() + 0.005
             except Exception as e:
                 logger.error(f"Raw stream sender error for {camera_config['name']}: {e}")
 
         threading.Thread(target=raw_stream_sender, daemon=True,
                          name=f"RawSender-{camera_config['camera_id'][:8]}").start()
 
-        # Thread 2: Detection sender — sends detection JSON (0x02) from inference results
+        # Thread 2: Detection state updater — filters inference results and updates
+        # the shared bbox state that raw_stream_sender reads on every frame.
+        # 0x02 detection JSON is sent by raw_stream_sender (piggybacked on each
+        # 0x01 frame) with correctly scaled coords — no separate send needed here.
         def detection_sender_worker():
             try:
                 while not stop_event.is_set():
@@ -271,8 +318,11 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
                                 face_area_score = 1 if face_area > face_area_threshold else 0
                                 if (face_confidence * face_area_score) >= confidence_threshold:
                                     valid_faces.append(face)
-                        if valid_faces:
-                            preview_client.send_detections(valid_faces)
+                        # Update shared state — raw_stream_sender reads this to include
+                        # bbox coords in the next 0x02 message (clears when faces=[]).
+                        with _detection_lock:
+                            _detection_state['faces'] = valid_faces
+                            _detection_state['ts'] = time.time()
                     except Exception:
                         pass
             except Exception as e:

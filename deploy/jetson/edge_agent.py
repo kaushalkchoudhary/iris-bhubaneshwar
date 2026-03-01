@@ -264,17 +264,23 @@ class EdgeAgent:
         if not self.python_bin:
             self.python_bin = sys.executable
 
-        cmd = [self.python_bin, str(self.inference_root / "start_all_inference.py"), "--python-bin", self.python_bin]
-        if not env_bool("EDGE_ENABLE_ANPR", True):
-            cmd.append("--no-anpr-api")
-        if not env_bool("EDGE_ENABLE_CROWD", True):
-            cmd.append("--no-crowd")
-        if not env_bool("EDGE_ENABLE_CROWD_FLOW", True):
-            cmd.append("--no-crowd-flow")
-        if not env_bool("EDGE_ENABLE_FRS", True):
-            cmd.append("--no-frs")
-        if env_bool("EDGE_FRS_LOCAL_ONLY", False):
-            cmd.append("--frs-local-only")
+        if env_bool("EDGE_FRS_ONLY", False):
+            # FRS-only mode: start only frs-analytics, nothing else.
+            cmd = [self.python_bin, str(self.inference_root / "start_frs.py"), "--python-bin", self.python_bin]
+            if env_bool("EDGE_FRS_LOCAL_ONLY", False):
+                cmd.append("--frs-local-only")
+        else:
+            cmd = [self.python_bin, str(self.inference_root / "start_all_inference.py"), "--python-bin", self.python_bin]
+            if not env_bool("EDGE_ENABLE_ANPR", True):
+                cmd.append("--no-anpr-api")
+            if not env_bool("EDGE_ENABLE_CROWD", True):
+                cmd.append("--no-crowd")
+            if not env_bool("EDGE_ENABLE_CROWD_FLOW", True):
+                cmd.append("--no-crowd-flow")
+            if not env_bool("EDGE_ENABLE_FRS", True):
+                cmd.append("--no-frs")
+            if env_bool("EDGE_FRS_LOCAL_ONLY", False):
+                cmd.append("--frs-local-only")
 
         self.logger.info("Starting inference process: %s", " ".join(cmd))
         self.child_proc = subprocess.Popen(

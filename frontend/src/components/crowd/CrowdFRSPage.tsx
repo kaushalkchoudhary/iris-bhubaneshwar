@@ -303,7 +303,7 @@ export function CrowdFRSPage() {
           name: w.name,
           reachable: w.reachable,
           cameraCount: w.cameraCount,
-          resources: w.resources,
+          resources: w.resources ?? undefined,
         })));
         const cameras: Array<{ id: string; name: string; workerId?: string | null }> =
           workerConfigs?.data ?? [];
@@ -1054,6 +1054,7 @@ export function CrowdFRSPage() {
                                   cameraId={cam.id}
                                   serviceFilter="frs"
                                   enabledServices={['frs']}
+                                  showOverlays={false}
                                   className="w-full h-full object-cover"
                                 />
                                 {/* LIVE badge */}
@@ -1271,7 +1272,7 @@ export function CrowdFRSPage() {
                     ) : globalTimeline.map((det) => (
                       <div key={det.id} className="flex gap-2 p-2 rounded-lg border border-white/5 bg-black/20">
                         <div className="h-12 w-16 rounded overflow-hidden border border-white/10 bg-black shrink-0">
-                          <img src={det.faceSnapshotUrl || det.metadata?.images?.['face.jpg'] || det.fullSnapshotUrl || det.metadata?.images?.['frame.jpg']} className="w-full h-full object-cover" alt="" />
+                          <img src={det.faceSnapshotUrl || det.metadata?.images?.['face_crop.jpg'] || det.fullSnapshotUrl || det.metadata?.images?.['frame.jpg']} className="w-full h-full object-cover" alt="" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2">
@@ -1915,8 +1916,8 @@ export function CrowdFRSPage() {
                 <div className="flex-1 overflow-y-auto p-2 space-y-1">
                   {unknownFaces.length > 0 ? unknownFaces.map((face) => {
                     const isSelected = selectedUnknown?.id === face.id;
-                    const faceImg = face.faceSnapshotUrl || face.metadata?.images?.['face.jpg'];
-                    const cropImg = face.metadata?.images?.['face_crop.jpg'];
+                    const faceImg = face.faceSnapshotUrl || face.metadata?.images?.['face_crop.jpg'] || face.metadata?.images?.['frame.jpg'];
+                    const cropImg = face.metadata?.images?.['face_crop.jpg'] || face.faceSnapshotUrl;
 
                     return (
                       <div
@@ -1984,7 +1985,7 @@ export function CrowdFRSPage() {
                   {selectedUnknown ? (
                     <>
                       <img
-                        src={selectedUnknown.faceSnapshotUrl || selectedUnknown.metadata?.images?.['face.jpg'] || selectedUnknown.metadata?.images?.['frame.jpg']}
+                        src={selectedUnknown.faceSnapshotUrl || selectedUnknown.metadata?.images?.['face_crop.jpg'] || selectedUnknown.metadata?.images?.['frame.jpg']}
                         className="w-full h-full object-cover"
                         alt=""
                       />
@@ -2564,13 +2565,13 @@ export function CrowdFRSPage() {
           <div className="grid grid-cols-[120px_1fr] gap-4">
             {/* Face Preview */}
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Face</Label>
-              <div className="aspect-square rounded-lg overflow-hidden border border-white/10 bg-black">
+              <Label className="text-xs text-muted-foreground">Frame Preview</Label>
+              <div className="aspect-[4/3] rounded-lg overflow-hidden border border-white/10 bg-black flex items-center justify-center p-1">
                 {selectedUnknownForConversion && (
                   <img
-                    src={selectedUnknownForConversion.metadata?.images?.['face.jpg']}
-                    className="w-full h-full object-cover"
-                    alt=""
+                    src={selectedUnknownForConversion.metadata?.fullImageUrl || selectedUnknownForConversion.metadata?.images?.['frame.jpg'] || selectedUnknownForConversion.metadata?.images?.['face.jpg']}
+                    className="w-full h-full object-contain rounded"
+                    alt="Unknown Person"
                   />
                 )}
               </div>

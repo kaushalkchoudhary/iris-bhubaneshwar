@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Camera, BarChart3, Settings, Users, AlertTriangle, Car,
-  TrendingUp, Eye, Monitor,
-  CheckSquare, HardDrive,
-  Box, ChevronDown, Hexagon, Sun, Moon, PanelLeftClose, PanelLeft, Activity, ScanFace, FileText
+  Camera, BarChart3, Settings,
+  ChevronDown, Hexagon, Sun, Moon, PanelLeftClose, PanelLeft, ScanFace, FileText
 } from 'lucide-react';
 import {
   Sidebar,
@@ -43,40 +41,11 @@ const modules: NavModule[] = [
     ],
   },
   {
-    id: 'itms',
-    label: 'ITMS',
-    displayLabel: 'Traffic Management',
-    icon: Car,
+    id: 'frs',
+    label: 'Face Recognition',
+    icon: ScanFace,
     items: [
-      { path: '/itms/anpr', label: 'ANPR', icon: Car },
-      { path: '/itms/vcc', label: 'VCC', icon: TrendingUp },
-      { path: '/itms/violations', label: 'Violations', icon: AlertTriangle },
-      { path: '/itms/watchlist', label: 'Watchlist', icon: Eye },
-      { path: '/itms/review', label: 'Review Center', icon: CheckSquare },
-      { path: '/itms/magicbox', label: 'MagicBox', icon: Box },
-    ],
-    subGroups: [
-      {
-        id: 'tv',
-        label: 'TV Dashboards',
-        icon: Monitor,
-        items: [
-          { path: '/itms/tv/toc-overview', label: 'TOC Overview', icon: Monitor },
-          { path: '/itms/tv/violations-wall', label: 'Violations Wall', icon: AlertTriangle },
-          { path: '/itms/tv/traffic-flow', label: 'Traffic Flow', icon: TrendingUp },
-          { path: '/itms/tv/watchlist-monitoring', label: 'Watchlist Monitor', icon: Eye },
-          { path: '/itms/tv/device-status', label: 'Device Status', icon: HardDrive },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'crowd',
-    label: 'Public Safety',
-    icon: Users,
-    items: [
-      { path: '/crowd-analytics', label: 'Crowd Analytics', icon: Activity },
-      { path: '/frs', label: 'Face Recognition', icon: ScanFace },
+      { path: '/frs', label: 'Detections & Alerts', icon: ScanFace },
     ],
   },
   {
@@ -160,8 +129,7 @@ export function AppSidebar() {
       });
     }
     if (Object.keys(initial).length === 0) {
-      initial['itms'] = true;
-      initial['itms-tv'] = true;
+      initial['frs'] = true;
     }
     return initial;
   });

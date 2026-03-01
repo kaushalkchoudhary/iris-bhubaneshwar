@@ -13,6 +13,12 @@ services:
       - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iris} -d ${POSTGRES_DB:-irisdrone}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   frs_db:
     image: pgvector/pgvector:pg16
@@ -26,6 +32,12 @@ services:
       - "127.0.0.1:5434:5432"
     volumes:
       - frs_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${FRS_POSTGRES_USER:-iris} -d ${FRS_POSTGRES_DB:-irisfrs}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   mqtt:
     image: eclipse-mosquitto:2

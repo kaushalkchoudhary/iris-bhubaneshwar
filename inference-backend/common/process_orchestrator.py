@@ -35,8 +35,8 @@ class ResourceLimits:
     """Resource limits per camera process"""
     MAX_CPU_PERCENT = 200.0  # 2 cores = 200% (on multi-core system)
     MAX_MEMORY_MB = 2048     # 2GB RAM limit
-    MAX_RESTART_ATTEMPTS = 5
-    RESTART_COOLDOWN_SECONDS = 60
+    MAX_RESTART_ATTEMPTS = 20
+    RESTART_COOLDOWN_SECONDS = 10
     HEALTH_CHECK_INTERVAL = 30
 
 class CameraWorkerProcess:
@@ -280,15 +280,19 @@ class GenericPipelineOrchestrator:
         self.config_manager = config_manager
         self.worker_function = worker_function
         self.pipeline_type = pipeline_type
-        
+
         # Process management
         self.camera_workers: Dict[str, CameraWorkerProcess] = {}
         self.result_queue: Queue = Queue() #Queue[ResultQueueItem]
         self.shutdown_event = Event()
-        
+
         # Monitoring thread
         self.monitor_thread = None
         self.config_reload_thread = None
+
+        # Last successfully fetched non-empty sources — used to avoid stopping
+        # cameras on transient API failures (strict_api_mode returning []).
+        self._last_good_sources: List[dict] = []
         
         self.logger = logging.getLogger(f'{pipeline_type}_orchestrator')
         self.logger.info(f"{pipeline_type} Orchestrator initialized")
@@ -337,7 +341,19 @@ class GenericPipelineOrchestrator:
         try:
             config = self.config_manager.get_config()
             sources = config.get('rtsp_sources', [])
-            
+
+            # If the API returned an empty list but we have running cameras, this
+            # is likely a transient failure (network blip, backend restarting).
+            # Keep the current cameras running and skip this reload cycle to
+            # avoid a "stop everything on API hiccup" storm.
+            if not sources and self.camera_workers:
+                self.logger.warning("Config reload returned 0 sources but %d cameras are running — keeping them (transient API failure?)", len(self.camera_workers))
+                return
+
+            # Record last good sources for future transient-failure protection.
+            if sources:
+                self._last_good_sources = sources
+
             # Get current and new camera IDs
             current_camera_ids = set(self.camera_workers.keys())
             new_camera_ids = {source['camera_id'] for source in sources}
