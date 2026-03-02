@@ -33,13 +33,11 @@ function Toggle({ checked, onChange, disabled }: {
       aria-checked={checked}
       disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none ${
-        disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-      } ${checked ? 'bg-indigo-500' : 'bg-zinc-700'}`}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
+        } ${checked ? 'bg-indigo-500' : 'bg-zinc-700'}`}
     >
-      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-        checked ? 'translate-x-[18px]' : 'translate-x-[3px]'
-      }`} />
+      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${checked ? 'translate-x-[18px]' : 'translate-x-[3px]'
+        }`} />
     </button>
   );
 }
@@ -53,10 +51,26 @@ const ANALYTIC_OPTIONS = [
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ online, status }: { online: boolean; status: WorkerStatus }) {
-  if (status === 'revoked') return <HudBadge variant="danger">Revoked</HudBadge>;
-  if (status === 'pending') return <HudBadge variant="warning">Pending</HudBadge>;
-  if (online) return <HudBadge variant="success">Online</HudBadge>;
-  return <HudBadge variant="danger">Offline</HudBadge>;
+  if (status === 'revoked') return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold tracking-wider uppercase bg-red-950/60 border border-red-500/30 text-red-400">
+      <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />REVOKED
+    </span>
+  );
+  if (status === 'pending') return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold tracking-wider uppercase bg-yellow-950/60 border border-yellow-500/30 text-yellow-400">
+      <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0" />PENDING
+    </span>
+  );
+  if (online) return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold tracking-wider uppercase bg-emerald-950/60 border border-emerald-500/30 text-emerald-400">
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />ONLINE
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold tracking-wider uppercase bg-zinc-800/60 border border-zinc-700/40 text-zinc-500">
+      <span className="w-1.5 h-1.5 rounded-full bg-zinc-600 shrink-0" />OFFLINE
+    </span>
+  );
 }
 
 // ─── Time Ago ─────────────────────────────────────────────────────────────────
@@ -85,9 +99,8 @@ function CameraConfigRow({ camera, cfg, onToggle, onSetField, onToggleAnalytic, 
   onSetRtsp: (url: string) => void;
 }) {
   return (
-    <div className={`rounded-lg border transition-colors ${
-      cfg.enabled ? 'border-indigo-500/25 bg-indigo-950/15' : 'border-white/6 bg-zinc-900/30'
-    }`}>
+    <div className={`rounded-lg border transition-colors ${cfg.enabled ? 'border-indigo-500/25 bg-indigo-950/15' : 'border-white/6 bg-zinc-900/30'
+      }`}>
       <div className="flex items-center gap-3 p-3">
         <Toggle checked={cfg.enabled} onChange={onToggle} />
         <div className="min-w-0 flex-1">
@@ -138,9 +151,8 @@ function CameraConfigRow({ camera, cfg, onToggle, onSetField, onToggleAnalytic, 
                     key={opt.code}
                     type="button"
                     onClick={() => onToggleAnalytic(opt.code, !isActive)}
-                    className={`px-2.5 py-1 text-xs rounded-md border transition-all font-medium ${
-                      isActive ? opt.active : 'bg-zinc-800/60 border-zinc-700 text-zinc-500'
-                    } cursor-pointer hover:border-zinc-500`}
+                    className={`px-2.5 py-1 text-xs rounded-md border transition-all font-medium ${isActive ? opt.active : 'bg-zinc-800/60 border-zinc-700 text-zinc-500'
+                      } cursor-pointer hover:border-zinc-500`}
                   >
                     {opt.label}
                   </button>
@@ -165,23 +177,18 @@ function WorkerLiveCard({ stat, onConfigure, onDelete }: {
   const r = stat.resources;
   const cpuPct = r?.cpu_percent ?? (r?.cpu_load_1m != null ? Math.min(100, (r.cpu_load_1m / 6) * 100) : null);
   const memPct = r?.memory_percent ?? null;
-  const tempC  = r?.temperature_c ?? null;
+  const tempC = r?.temperature_c ?? null;
 
   return (
-    <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl border ${
-      online ? 'border-green-500/15 bg-zinc-900/60' :
-      stat.status === 'pending' ? 'border-yellow-500/20 bg-zinc-900/40' :
-      'border-white/5 bg-zinc-900/40'
-    }`}>
+    <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl border ${online ? 'border-green-500/15 bg-zinc-900/60' :
+        stat.status === 'pending' ? 'border-yellow-500/20 bg-zinc-900/40' :
+          'border-white/5 bg-zinc-900/40'
+      }`}>
       {/* Left: icon + identity */}
       <div className="flex items-center gap-3 min-w-0">
-        <div className={`w-8 h-8 rounded-lg shrink-0 flex items-center justify-center relative ${
-          online ? 'bg-green-900/30' : 'bg-zinc-800/50'
-        }`}>
+        <div className={`w-8 h-8 rounded-lg shrink-0 flex items-center justify-center ${online ? 'bg-green-900/30' : 'bg-zinc-800/50'
+          }`}>
           <Server className={`w-4 h-4 ${online ? 'text-green-400' : 'text-zinc-500'}`} />
-          <span className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full border border-zinc-900 ${
-            online ? 'bg-green-400' : 'bg-zinc-600'
-          }`} />
         </div>
         <div>
           <div className="flex items-center gap-2">
@@ -210,10 +217,9 @@ function WorkerLiveCard({ stat, onConfigure, onDelete }: {
           <span>{memPct != null ? `${memPct.toFixed(0)}%` : '—'}</span>
         </div>
         {/* Temp */}
-        <div className={`flex items-center gap-1 text-[11px] ${
-          tempC == null ? 'text-zinc-600' :
-          tempC > 80 ? 'text-red-400' : tempC > 65 ? 'text-amber-400' : tempC > 50 ? 'text-yellow-400' : 'text-sky-400'
-        }`}>
+        <div className={`flex items-center gap-1 text-[11px] ${tempC == null ? 'text-zinc-600' :
+            tempC > 80 ? 'text-red-400' : tempC > 65 ? 'text-amber-400' : tempC > 50 ? 'text-yellow-400' : 'text-sky-400'
+          }`}>
           <Thermometer className="w-3 h-3" />
           <span>{tempC != null ? `${tempC.toFixed(1)}°C` : '—'}</span>
         </div>
@@ -618,16 +624,14 @@ export function WorkersDashboard() {
               <CardContent>
                 <div className="space-y-2">
                   {tokens.map((token) => (
-                    <div key={token.id} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg border ${
-                      token.status === 'active' ? 'border-white/10 bg-zinc-900/40' :
-                      token.status === 'used' ? 'border-emerald-500/20 bg-emerald-900/10' :
-                      'border-white/5 bg-zinc-900/20'
-                    }`}>
+                    <div key={token.id} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg border ${token.status === 'active' ? 'border-white/10 bg-zinc-900/40' :
+                        token.status === 'used' ? 'border-emerald-500/20 bg-emerald-900/10' :
+                          'border-white/5 bg-zinc-900/20'
+                      }`}>
                       <div className="flex items-center gap-3">
-                        <Key className={`w-4 h-4 shrink-0 ${
-                          token.status === 'active' ? 'text-blue-400' :
-                          token.status === 'used' ? 'text-emerald-400' : 'text-zinc-500'
-                        }`} />
+                        <Key className={`w-4 h-4 shrink-0 ${token.status === 'active' ? 'text-blue-400' :
+                            token.status === 'used' ? 'text-emerald-400' : 'text-zinc-500'
+                          }`} />
                         <div>
                           <p className="text-sm font-medium">{token.name}</p>
                           <p className="text-xs font-mono text-zinc-500 mt-0.5">{token.token.substring(0, 28)}…</p>
@@ -640,7 +644,7 @@ export function WorkersDashboard() {
                       <div className="flex items-center gap-2">
                         <HudBadge variant={
                           token.status === 'active' ? 'success' : token.status === 'used' ? 'info' :
-                          token.status === 'expired' ? 'secondary' : 'default'
+                            token.status === 'expired' ? 'secondary' : 'default'
                         } size="sm">{token.status}</HudBadge>
                         {token.status === 'active' && (
                           <>

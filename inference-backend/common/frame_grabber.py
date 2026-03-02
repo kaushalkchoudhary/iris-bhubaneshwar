@@ -104,13 +104,8 @@ class FrameGrabber:
         self.stats_interval = 30.0  # Log stats every 30 seconds
         self.last_warning_times = {} # For rate-limiting warnings
 
-        # Logging setup
-        log_dir = "logs"
-        os.makedirs(log_dir, exist_ok=True)
-        handler = logging.FileHandler(os.path.join(log_dir, f"grabber_{self.name}.log"))
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        # Logging: stderr/stdout only — no per-camera file to avoid disk fill.
+        # (File logs are not covered by logrotate and accumulate indefinitely.)
         logger.setLevel(logging.WARNING)
 
     def _should_log_warning(self, key: str, interval: float = 60.0) -> bool:
@@ -175,8 +170,8 @@ class FrameGrabber:
             if self.cap is None or not self.cap.isOpened():
                 logger.info(f"[{self.name}] Need to initialize capture. cap is {'None' if self.cap is None else 'not opened'}")
                 if not self._initialize_capture():
-                    logger.error(f"[{self.name}] Initialization failed. Retrying in 10 seconds...")
-                    time.sleep(10)
+                    logger.error(f"[{self.name}] Initialization failed. Retrying in 5 seconds...")
+                    time.sleep(5)
                     continue
             
             # logger.info(f"[{self.name}] Attempting to read frame...")  # Too verbose for production
@@ -186,8 +181,8 @@ class FrameGrabber:
                 if self._should_log_warning("grab_failed"):
                     logger.warning(f"[{self.name}] Failed to grab frame. Stream might be disconnected (suppressing for 60s).")
                 self.cap.release()
-                self.cap = None # Force re-initialization in the next loop
-                time.sleep(5) # Wait before trying to reconnect
+                self.cap = None  # Force re-initialization in the next loop
+                time.sleep(2)    # Short wait before reconnect attempt
                 continue
             
             # Increment frame counter

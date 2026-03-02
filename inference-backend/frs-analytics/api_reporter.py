@@ -81,7 +81,7 @@ def api_reporter(
         'last_summary_time': time.time(),
         'last_cleanup_time': time.time()
     }
-    summary_interval = 10.0
+    summary_interval = 60.0  # Was 10s — reduced to cut log spam
     cleanup_interval = 300.0
 
     while True:
@@ -184,42 +184,31 @@ def api_reporter(
                     stats['camera_stats'][camera_id]['duplicates'] += 1
                     continue
 
-                x1, y1, x2, y2 = map(int, face_to_report['bbox'])
-                face_crop_img = frame[y1:y2, x1:x2]
-
-                # Create a copy of the frame to draw bbox
-                frame_to_encode = frame.copy()
-
-                # Draw bounding box for both known and unknown faces on the full frame
-                color = (0, 255, 0) if is_known else (0, 165, 255)  # Green for known, Orange for unknown
-                cv2.rectangle(frame_to_encode, (x1, y1), (x2, y2), color, 6)
-
-                if face_crop_img is None or face_crop_img.size == 0:
-                    logger.warning(f"[{camera_id}] Empty face crop for bbox {face_to_report['bbox']}; sending full frame only.")
-                    face_crop_img = None
-
-                if not is_known:
-                    # Do not send zoomed face for unknown
-                    face_crop_img = None
-
-                jpeg_quality = api_config.get('jpeg_quality', 75)
-                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
-
-                resize_height = api_config.get('full_frame_resize_height')
+                # Snapshot: resize to 480px height for storage/bandwidth efficiency
+                resize_height = api_config.get('full_frame_resize_height', 480)
 
                 if resize_height and isinstance(resize_height, int):
                     try:
-                        h, w = frame_to_encode.shape[:2]
+                        h, w = frame.shape[:2]
                         new_w = int((resize_height / h) * w)
-                        frame_to_encode = cv2.resize(frame_to_encode, (new_w, resize_height), interpolation=cv2.INTER_AREA)
+                        frame_to_encode = cv2.resize(frame, (new_w, resize_height), interpolation=cv2.INTER_AREA)
                     except Exception as e:
                         logger.warning(f"[{camera_id}] Failed to resize frame: {e}")
+                        frame_to_encode = frame
+                else:
+                    frame_to_encode = frame
 
+                jpeg_quality = api_config.get('jpeg_quality', 75)
+                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
                 _, frame_encoded = cv2.imencode('.jpg', frame_to_encode, encode_params)
 
+                # Face crop: only for known persons; frontend draws its own bboxes
                 face_crop_encoded = None
-                if face_crop_img is not None:
-                    _, face_crop_encoded = cv2.imencode('.jpg', face_crop_img, encode_params)
+                if is_known:
+                    x1, y1, x2, y2 = map(int, face_to_report['bbox'])
+                    face_crop_img = frame[y1:y2, x1:x2]
+                    if face_crop_img is not None and face_crop_img.size > 0:
+                        _, face_crop_encoded = cv2.imencode('.jpg', face_crop_img, encode_params)
 
                 age = face_to_report.get('age')
                 gender = face_to_report.get('gender')

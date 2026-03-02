@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import type { FRSGlobalIdentity, FRSMatch, Person } from '@/lib/api';
 
 
@@ -203,7 +204,7 @@ export function CrowdFRSPage() {
 
   // Enrollment State
   const [showEnrollDialog, setShowEnrollDialog] = useState(false);
-  const [enrollForm, setEnrollForm] = useState({ name: '', category: '', threatLevel: '', notes: '' });
+  const [enrollForm, setEnrollForm] = useState({ name: '', age: '', gender: '', height: '', category: '', threatLevel: '', notes: '', addToWatchlist: false });
   const [enrollFile, setEnrollFile] = useState<File | null>(null);
   const [enrollFiles, setEnrollFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -258,10 +259,11 @@ export function CrowdFRSPage() {
     category: 'person_of_interest',
     threatLevel: 'low',
     age: '',
-    gender: 'male',
+    gender: 'unknown',
     height: '',
     aliases: '',
-    notes: ''
+    notes: '',
+    addToWatchlist: false
   });
   const [isConverting, setIsConverting] = useState(false);
 
@@ -444,64 +446,77 @@ export function CrowdFRSPage() {
 
   const handleConvertUnknownToPerson = async () => {
     if (!selectedUnknownForConversion || !convertForm.name) {
-      toast({ title: 'Missing Name', description: 'Please enter a name for this person.', variant: 'destructive' });
+      toast({
+        title: 'Missing Name',
+        description: 'Please enter a name for this person.',
+        variant: 'destructive'
+      });
       return;
     }
 
     setIsConverting(true);
     try {
-      // Download the unknown face image
-      const faceImageUrl = selectedUnknownForConversion.metadata?.images?.['face.jpg'];
+      // Get the face image URL from metadata
+      const faceImageUrl = selectedUnknownForConversion.faceSnapshotUrl ||
+        selectedUnknownForConversion.metadata?.images?.['face.jpg'] ||
+        selectedUnknownForConversion.metadata?.images?.['face_crop.jpg'];
+
       if (!faceImageUrl) {
-        toast({ title: 'Error', description: 'No face image available', variant: 'destructive' });
-        return;
+        throw new Error('No face image available for conversion');
       }
 
+      // Fetch the image and convert to blob
       const response = await fetch(faceImageUrl);
+      if (!response.ok) throw new Error(`Failed to fetch face image: ${response.statusText}`);
       const blob = await response.blob();
 
       // Create FormData with image and details
       const formData = new FormData();
       formData.append('images[]', blob, 'face.jpg');
       formData.append('name', convertForm.name);
-      formData.append('category', convertForm.category);
-      formData.append('threatLevel', convertForm.threatLevel);
-      formData.append('age', convertForm.age);
-      formData.append('gender', convertForm.gender);
-      formData.append('height', convertForm.height);
-      formData.append('aliases', convertForm.aliases);
-      formData.append('notes', convertForm.notes);
+      if (convertForm.age) formData.append('age', convertForm.age);
+      if (convertForm.gender) formData.append('gender', convertForm.gender);
+      if (convertForm.height) formData.append('height', convertForm.height);
 
-      await apiClient.createPerson(formData);
+      // If watchlist is toggled, set high-priority values
+      const category = convertForm.addToWatchlist ? 'suspect' : (convertForm.category || 'person_of_interest');
+      const threatLevel = convertForm.addToWatchlist ? 'high' : (convertForm.threatLevel || 'low');
 
-      toast({
-        title: 'Person Identified',
-        description: `${convertForm.name} has been added to ${convertForm.threatLevel === 'high' || convertForm.category === 'warrant' ? 'watchlist' : 'identified persons'}.`,
-        duration: 3000,
-      });
+      formData.append('category', category);
+      formData.append('threatLevel', threatLevel);
+      if (convertForm.notes) formData.append('notes', convertForm.notes);
 
-      // Reset form and close dialog
-      setConvertForm({
-        name: '',
-        category: 'person_of_interest',
-        threatLevel: 'low',
-        age: '',
-        gender: 'male',
-        height: '',
-        aliases: '',
-        notes: ''
-      });
-      setShowConvertUnknownDialog(false);
-      setSelectedUnknownForConversion(null);
+      const result = await apiClient.createPerson(formData);
 
-      // Refresh data
-      fetchPersons();
-      fetchUnknownFaces();
-    } catch (err) {
+      if (result) {
+        toast({
+          title: 'Success',
+          description: `${convertForm.name} has been enrolled and added to the database.`,
+        });
+
+        // Close dialog and reset form
+        setShowConvertUnknownDialog(false);
+        setConvertForm({
+          name: '',
+          category: 'person_of_interest',
+          threatLevel: 'low',
+          age: '',
+          gender: 'unknown',
+          height: '',
+          aliases: '',
+          notes: '',
+          addToWatchlist: false
+        });
+
+        // Refresh lists
+        fetchPersons();
+        fetchUnknownFaces();
+      }
+    } catch (err: any) {
       console.error('Error converting unknown to person:', err);
       toast({
         title: 'Error',
-        description: 'Failed to create person profile',
+        description: err.message || 'Failed to create person profile',
         variant: 'destructive'
       });
     } finally {
@@ -571,12 +586,19 @@ export function CrowdFRSPage() {
         formData.append('images[]', file);
       });
       formData.append('name', enrollForm.name);
-      formData.append('category', enrollForm.category || 'person_of_interest');
-      formData.append('threatLevel', enrollForm.threatLevel || 'medium');
+      if (enrollForm.age) formData.append('age', enrollForm.age);
+      if (enrollForm.gender) formData.append('gender', enrollForm.gender);
+      if (enrollForm.height) formData.append('height', enrollForm.height);
+      // If watchlist is toggled, set high-priority values
+      const category = enrollForm.addToWatchlist ? 'suspect' : (enrollForm.category || 'person_of_interest');
+      const threatLevel = enrollForm.addToWatchlist ? 'high' : (enrollForm.threatLevel || 'medium');
+
+      formData.append('category', category);
+      formData.append('threatLevel', threatLevel);
       formData.append('notes', enrollForm.notes || '');
       const res = await apiClient.createPerson(formData);
       if (res) {
-        setEnrollForm({ name: '', category: '', threatLevel: '', notes: '' });
+        setEnrollForm({ name: '', age: '', gender: '', height: '', category: '', threatLevel: '', notes: '', addToWatchlist: false });
         setEnrollFile(null);
         setEnrollFiles([]);
         setShowEnrollDialog(false);
@@ -2316,7 +2338,12 @@ export function CrowdFRSPage() {
                   >
                     <Trash className="h-3 w-3 mr-1.5" /> Delete
                   </Button>
-                  <Button size="sm" variant="outline" className="flex-1 h-8 text-xs border-white/10 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 h-8 text-xs border-white/10 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
+                    onClick={() => selectedPerson && openEditPerson(selectedPerson)}
+                  >
                     <Edit className="h-3 w-3 mr-1.5" /> Edit
                   </Button>
                 </div>
@@ -2471,6 +2498,40 @@ export function CrowdFRSPage() {
                 className="h-9 bg-black/20 border-white/10 text-zinc-100 placeholder:text-zinc-600"
               />
             </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-sm text-zinc-400 mb-1 block">Age</label>
+                <Input
+                  type="number"
+                  value={enrollForm.age}
+                  onChange={(e) => setEnrollForm({ ...enrollForm, age: e.target.value })}
+                  placeholder="e.g. 35"
+                  className="h-9 bg-black/20 border-white/10 text-zinc-100 placeholder:text-zinc-600"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-zinc-400 mb-1 block">Gender</label>
+                <select
+                  value={enrollForm.gender}
+                  onChange={(e) => setEnrollForm({ ...enrollForm, gender: e.target.value })}
+                  className="h-9 w-full rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-zinc-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                >
+                  <option value="">Select</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm text-zinc-400 mb-1 block">Height</label>
+                <Input
+                  value={enrollForm.height}
+                  onChange={(e) => setEnrollForm({ ...enrollForm, height: e.target.value })}
+                  placeholder="e.g. 5ft 10in"
+                  className="h-9 bg-black/20 border-white/10 text-zinc-100 placeholder:text-zinc-600"
+                />
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-sm text-zinc-400 mb-1 block">Category</label>
@@ -2502,11 +2563,22 @@ export function CrowdFRSPage() {
             </div>
             <div>
               <label className="text-sm text-zinc-400 mb-1 block">Notes</label>
-              <Input
+              <textarea
                 value={enrollForm.notes}
                 onChange={(e) => setEnrollForm({ ...enrollForm, notes: e.target.value })}
-                placeholder="Additional notes"
-                className="h-9 bg-black/20 border-white/10 text-zinc-100 placeholder:text-zinc-600"
+                placeholder="Additional notes..."
+                className="w-full h-20 bg-black/20 border-white/10 text-zinc-100 placeholder:text-zinc-600 rounded-lg px-3 py-2 text-sm resize-none"
+              />
+            </div>
+            <div className="flex items-center justify-between p-3 rounded-lg border border-primary/20 bg-primary/5">
+              <div className="space-y-0.5">
+                <label className="text-xs font-semibold text-primary block">Add to Watchlist</label>
+                <p className="text-[10px] text-muted-foreground/70">Enable immediate alerts for this person</p>
+              </div>
+              <Switch
+                checked={enrollForm.addToWatchlist}
+                onCheckedChange={(val: boolean) => setEnrollForm({ ...enrollForm, addToWatchlist: val })}
+                className="data-[state=checked]:bg-primary"
               />
             </div>
             <div className="flex gap-2 justify-end pt-2">
@@ -2715,6 +2787,18 @@ export function CrowdFRSPage() {
                     className="w-full h-20 text-xs bg-zinc-900/60 border border-white/5 rounded-md px-3 py-2 text-white mt-1 resize-none"
                     value={convertForm.notes}
                     onChange={(e) => setConvertForm({ ...convertForm, notes: e.target.value })}
+                  />
+                </div>
+
+                <div className="col-span-2 flex items-center justify-between p-3 rounded-lg border border-primary/20 bg-primary/5 mt-2">
+                  <div className="space-y-0.5">
+                    <Label className="text-xs font-semibold text-primary">Add to Watchlist</Label>
+                    <p className="text-[10px] text-muted-foreground/70">Mark as high threat for immediate alert generation</p>
+                  </div>
+                  <Switch
+                    checked={convertForm.addToWatchlist}
+                    onCheckedChange={(val: boolean) => setConvertForm({ ...convertForm, addToWatchlist: val })}
+                    className="data-[state=checked]:bg-primary"
                   />
                 </div>
               </div>

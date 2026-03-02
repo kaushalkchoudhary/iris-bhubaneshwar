@@ -97,6 +97,12 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
     try:
         load_iris_environment()
 
+        # Ensure InsightFace finds the pre-cached model, not ~/root/.insightface (empty).
+        # Must be set before any insightface import in this subprocess.
+        import os as _os
+        if 'INSIGHTFACE_HOME' not in _os.environ:
+            _os.environ['INSIGHTFACE_HOME'] = '/opt/iris-edge/.insightface'
+
         logger = logging.getLogger(f'frs_worker_{camera_config.get("camera_id", "unknown")[:8]}')
         logger.info(f"FRS worker started for {camera_config.get('camera_id', 'unknown')}")
 
@@ -116,15 +122,15 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
             logger.warning(f"Could not query onnxruntime providers ({_e}), using CPU for {camera_config['name']}")
 
         # Internal thread queues — keep small to avoid accumulating large frames in RAM.
-        # Each frame is ~6 MB (1080p numpy array); 10 slots = ~60 MB per queue.
-        frames_queue: ThreadQueue = ThreadQueue(maxsize=10)
+        # Each frame is ~2-3 MB (960px-wide resized, ~3 channels); 4 slots ≈ ~12 MB per queue.
+        frames_queue: ThreadQueue = ThreadQueue(maxsize=4)
         # Inference output is fanned out so API reporting and live preview both receive every result.
-        results_queue: ThreadQueue = ThreadQueue(maxsize=10)
-        # Reporter queue slightly larger — HTTP requests can be slow; allows ~4s backlog at 5 fps.
-        reporter_queue: ThreadQueue = ThreadQueue(maxsize=20)
-        preview_queue: ThreadQueue = ThreadQueue(maxsize=10)
+        results_queue: ThreadQueue = ThreadQueue(maxsize=4)
+        # Reporter queue: HTTP requests can be slow; allow a short backlog.
+        reporter_queue: ThreadQueue = ThreadQueue(maxsize=6)
+        preview_queue: ThreadQueue = ThreadQueue(maxsize=4)
         # Raw frames queue — receives every frame from FrameGrabber, bypasses frame_skip.
-        # Small maxsize=2 so we always drain to the LATEST frame (stale frames are dropped
+        # maxsize=2 so we always drain to the LATEST frame (stale frames are dropped
         # by FrameGrabber's put_nowait when full).
         raw_frames_queue: ThreadQueue = ThreadQueue(maxsize=2)
         # Shared state: latest face detections for drawing bbox overlay on raw frames.
@@ -150,7 +156,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
             'use_letterbox': cfg('use_letterbox', True),
             'batch_size': cfg('batch_size', 10),
             'batch_timeout': cfg('batch_timeout', 0.5),
-            'log_file': f'logs/inference_{camera_config["camera_id"][:8]}.log'
+            'log_file': None  # No per-camera file logs — all output goes to stdout/journald
         }
 
         # API reporter config
@@ -192,7 +198,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         preview_client = create_live_preview_client(
             camera_id=camera_config['camera_id'],
             server_url=websocket_server_url,
-            max_fps=30,
+            max_fps=20,  # Reduced from 30 — biggest CPU sink was JPEG encoding at 30fps
             frame_resize_height=240,
         )
 
@@ -260,7 +266,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         def raw_stream_sender():
             from queue import Empty as _Empty
             import time as _t
-            frame_interval = 1.0 / 30  # 33.3 ms per frame
+            frame_interval = 1.0 / 20  # 50 ms per frame (reduced from 30 fps to cut CPU)
             next_send = _t.monotonic()
             try:
                 while not stop_event.is_set():
@@ -342,7 +348,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
             rtsp_transport=cfg('rtsp_transport', 'tcp'),
             buffer_size=cfg('buffer_size', 10),
             frame_skip=cfg('skip_frames', 6),
-            resize_width=cfg('resize_width', None)
+            resize_width=cfg('resize_width', 960)  # Limit frame width at source to reduce RAM
         )
 
         frame_grabber.start()

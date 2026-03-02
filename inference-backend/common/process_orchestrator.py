@@ -36,8 +36,8 @@ class ResourceLimits:
     MAX_CPU_PERCENT = 200.0  # 2 cores = 200% (on multi-core system)
     MAX_MEMORY_MB = 2048     # 2GB RAM limit
     MAX_RESTART_ATTEMPTS = 20
-    RESTART_COOLDOWN_SECONDS = 10
-    HEALTH_CHECK_INTERVAL = 30
+    RESTART_COOLDOWN_SECONDS = 5
+    HEALTH_CHECK_INTERVAL = 3   # Check every 3s so dead cameras are restarted quickly
 
 class CameraWorkerProcess:
     """Manages a single camera worker process with health monitoring"""
@@ -133,32 +133,32 @@ class CameraWorkerProcess:
             self.last_error = str(e)
             self.logger.error(f"Failed to start camera {self.camera_id}: {e}")
     
-    def stop(self, timeout: int = 10):
+    def stop(self, timeout: int = 3):
         """Stop the camera worker process gracefully"""
         try:
             self.status = "stopped"
             if not self.process:
                 return
-            
+
             self.logger.info(f"Stopping camera worker process for {self.camera_id}")
-            
+
             # Signal the process to stop
             self.stop_event.set()
-            
-            # Wait for graceful shutdown
+
+            # Wait for graceful shutdown (short timeout — dead processes return instantly)
             self.process.join(timeout=timeout)
-            
+
             # Force terminate if still alive
             if self.process.is_alive():
                 self.logger.warning(f"Force terminating unresponsive worker for {self.camera_id}")
                 self.process.terminate()
-                self.process.join(timeout=5)
-                
+                self.process.join(timeout=2)
+
                 # Kill if still alive
                 if self.process.is_alive():
                     self.logger.error(f"Force killing stubborn worker for {self.camera_id}")
                     self.process.kill()
-                    self.process.join(timeout=2)
+                    self.process.join(timeout=1)
             
             self.process = None
             self.status = "stopped"
@@ -184,13 +184,13 @@ class CameraWorkerProcess:
         
         self.logger.info(f"Restarting camera worker process for {self.camera_id}")
         self.status = "restarting"
-        
+
         # Stop current process
         self.stop()
-        
-        # Wait a moment
-        time.sleep(2)
-        
+
+        # Brief pause so OS releases resources (file handles, GPU context, etc.)
+        time.sleep(0.3)
+
         # Clear stop event for new process
         self.stop_event.clear()
         
@@ -428,12 +428,24 @@ class GenericPipelineOrchestrator:
                                        f"Memory {health['memory_mb']:.1f}MB, "
                                        f"Uptime {health['uptime_seconds']:.0f}s")
                     
-                    # Restart if needed
-                    if health['needs_restart'] and worker.status != 'restarting':
+                    # Restart due to resource overuse
+                    if health['needs_restart'] and worker.status not in ('restarting', 'starting'):
                         self.logger.warning(f"Restarting camera {camera_id}: {health['last_error']}")
-                        worker.restart()
-                    
-                    # Remove failed workers that can't restart
+                        threading.Thread(
+                            target=worker.restart, daemon=True,
+                            name=f"Restart-{camera_id[:8]}"
+                        ).start()
+
+                    # Restart dead process (exited unexpectedly — frame grabber died,
+                    # inference thread crashed, RTSP permanent failure, etc.)
+                    elif not health['alive'] and worker.status not in ('restarting', 'starting', 'failed'):
+                        self.logger.warning(f"Camera {camera_id} process died unexpectedly — restarting now")
+                        threading.Thread(
+                            target=worker.restart, daemon=True,
+                            name=f"Restart-{camera_id[:8]}"
+                        ).start()
+
+                    # Remove permanently failed workers
                     elif worker.status == 'failed' and not worker._can_restart():
                         self.logger.error(f"Camera {camera_id} permanently failed, removing")
                         worker.stop()

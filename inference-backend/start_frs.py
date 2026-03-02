@@ -129,6 +129,37 @@ def main() -> int:
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
+    # ── Embedding server (GPU) ─────────────────────────────────────────────────
+    # Start embedding_server.py so the central Mac can offload face embedding
+    # computation to this Jetson's GPU.  Runs on EMBEDDING_SERVER_PORT (default 5555).
+    embed_server_script = frs_dir / "embedding_server.py"
+    embed_proc: Optional[subprocess.Popen] = None
+    if embed_server_script.exists():
+        embed_cmd = [args.python_bin, str(embed_server_script)]
+        embed_env = dict(base_env)
+        embed_env.setdefault("EMBEDDING_SERVER_PORT", "5555")
+        try:
+            embed_proc = subprocess.Popen(
+                embed_cmd,
+                cwd=str(frs_dir),
+                env=embed_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            threading.Thread(
+                target=stream_output,
+                args=("embed-server", embed_proc.stdout, logs_dir, logger, write_service_log),
+                daemon=True,
+            ).start()
+            logger.info("Embedding server started (pid=%s, port=%s)", embed_proc.pid, embed_env["EMBEDDING_SERVER_PORT"])
+        except Exception as exc:
+            logger.warning("Could not start embedding server: %s", exc)
+            embed_proc = None
+    else:
+        logger.warning("embedding_server.py not found at %s — skipping", embed_server_script)
+
     logger.info("Starting FRS service | gpu=%s | cmd=%s", frs_gpu or "all", " ".join(frs_cmd))
 
     def start_proc() -> subprocess.Popen:
@@ -176,6 +207,13 @@ def main() -> int:
                 logger.warning("Force killing FRS process")
                 proc.kill()
                 proc.wait(timeout=5)
+        if embed_proc is not None and embed_proc.poll() is None:
+            logger.info("Stopping embedding server (pid=%s)", embed_proc.pid)
+            embed_proc.terminate()
+            try:
+                embed_proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                embed_proc.kill()
         logger.info("FRS launcher stopped.")
 
     return 0

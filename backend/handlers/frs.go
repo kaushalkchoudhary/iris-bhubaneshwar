@@ -1,13 +1,13 @@
 package handlers
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/irisdrone/backend/database"
 	"github.com/irisdrone/backend/models"
+	"gorm.io/gorm"
 )
 
 // watchlistVersion is bumped whenever the FRS person list changes so Jetsons
@@ -33,6 +34,14 @@ func bumpWatchlistVersion() {
 	watchlistVersion++
 	watchlistUpdatedAt = time.Now().UTC()
 	watchlistVersionMu.Unlock()
+
+	// Also increment ConfigVersion for all active workers/Jetsons so they detect
+	// the change via their polling logic and restart inference to sync.
+	if err := database.DB.Model(&models.Worker{}).
+		Where("status IN ?", []string{"active", "approved"}).
+		Update("config_version", gorm.Expr("config_version + 1")).Error; err != nil {
+		fmt.Printf("Error bumping worker config versions: %v\n", err)
+	}
 }
 
 // GetFRSWatchlistVersion returns the current watchlist version counter.
@@ -46,80 +55,64 @@ func GetFRSWatchlistVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"version": v, "updated_at": t.Format(time.RFC3339)})
 }
 
-// frsEmbeddingPython returns the Python binary to use for face embedding computation.
-func frsEmbeddingPython() string {
-	candidates := []string{
-		"/home/ubuntu/iris-sringeri/inference-backend/ANPR-VCC_analytics/.venv/bin/python",
-		"/home/ubuntu/iris2/iris-backend/analytics/services/pipelines/personid/venv/bin/python3",
-		"python3",
+// computeFaceEmbeddingOnJetson POSTs raw image bytes to the embedding server
+// running on an active Jetson (port 5555) and returns the 512-dim face embedding.
+// It tries each known worker in turn and returns on first success.
+func computeFaceEmbeddingOnJetson(imageData []byte) ([]float64, error) {
+	var workers []models.Worker
+	if err := database.Main().
+		Where("status IN ?", []string{string(models.WorkerStatusApproved), string(models.WorkerStatusActive)}).
+		Find(&workers).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch workers: %w", err)
 	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p
+	if len(workers) == 0 {
+		return nil, fmt.Errorf("no active Jetson workers available for embedding")
+	}
+
+	port := strings.TrimSpace(os.Getenv("EMBEDDING_SERVER_PORT"))
+	if port == "" {
+		port = "5555"
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	for _, w := range workers {
+		ip := w.IP
+		if ip == "" && w.LastIP != nil {
+			ip = *w.LastIP
 		}
-	}
-	return "python3"
-}
-
-// frsEmbeddingScript returns the path to the get_face_embedding.py script.
-func frsEmbeddingScript() string {
-	exePath, _ := os.Executable()
-
-	candidates := []string{
-		// Relative to CWD — works when started from backend/ dir (start_all_services.sh)
-		"scripts/get_face_embedding.py",
-		// Relative to the compiled binary location
-		filepath.Join(filepath.Dir(exePath), "scripts", "get_face_embedding.py"),
-		// Ubuntu deployment paths (backward compat)
-		"/home/ubuntu/iris-sringeri/backend/scripts/get_face_embedding.py",
-		"/home/ubuntu/iris2/backend/scripts/get_face_embedding.py",
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p
+		if ip == "" {
+			continue
 		}
-	}
-	return ""
-}
 
-// computeFaceEmbedding runs the Python embedding script on an image file and returns the embedding.
-func computeFaceEmbedding(imagePath string) ([]float64, error) {
-	script := frsEmbeddingScript()
-	if script == "" {
-		return nil, fmt.Errorf("get_face_embedding.py not found")
-	}
-	python := frsEmbeddingPython()
+		url := fmt.Sprintf("http://%s:%s/embed", ip, port)
+		resp, err := client.Post(url, "image/jpeg", bytes.NewReader(imageData))
+		if err != nil {
+			log.Printf("WARN: embedding server at %s unreachable: %v", url, err)
+			continue
+		}
 
-	cmd := exec.Command(python, script, imagePath)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("embedding script error: %w", err)
-	}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 
-	var result struct {
-		Success   bool      `json:"success"`
-		Error     string    `json:"error"`
-		Embedding []float64 `json:"embedding"`
-	}
-
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "{") {
-			if err := json.Unmarshal([]byte(line), &result); err == nil {
-				break
-			}
+		var result struct {
+			Success   bool      `json:"success"`
+			Error     string    `json:"error"`
+			Embedding []float64 `json:"embedding"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			log.Printf("WARN: embedding server at %s bad response: %v", url, err)
+			continue
+		}
+		if result.Success && len(result.Embedding) > 0 {
+			return result.Embedding, nil
+		}
+		if result.Error != "" {
+			log.Printf("WARN: embedding server at %s: %s", url, result.Error)
 		}
 	}
 
-	if !result.Success {
-		msg := result.Error
-		if msg == "" {
-			msg = "no face detected or script failed"
-		}
-		return nil, fmt.Errorf("%s", msg)
-	}
-	return result.Embedding, nil
+	return nil, fmt.Errorf("no Jetson embedding server returned a valid embedding")
 }
 
 func getFormValue(c *gin.Context, keys ...string) string {
@@ -244,16 +237,20 @@ func CreateFRSPerson(c *gin.Context) {
 		person.Metadata = models.NewJSONB(map[string]interface{}{"galleryImages": uploaded})
 	}
 
-	// Compute face embeddings from uploaded images
+	// Compute face embeddings from uploaded images (via Jetson GPU embedding server)
 	embeddings := []interface{}{}
 	baseDir := getUploadDirBase()
 	for _, relURL := range uploaded {
-		// relURL is like /uploads/frs/persons/...  — convert to disk path
 		rel := strings.TrimPrefix(relURL, "/uploads/")
 		absPath := filepath.Join(baseDir, rel)
-		emb, embErr := computeFaceEmbedding(absPath)
+		imageData, readErr := os.ReadFile(absPath)
+		if readErr != nil {
+			log.Printf("WARN: could not read image for embedding: %v", readErr)
+			continue
+		}
+		emb, embErr := computeFaceEmbeddingOnJetson(imageData)
 		if embErr != nil {
-			// Non-fatal: log and continue; person saved without this embedding
+			log.Printf("WARN: Jetson embedding failed: %v", embErr)
 			continue
 		}
 		embeddings = append(embeddings, emb)
@@ -370,13 +367,19 @@ func AddFRSPersonEmbeddings(c *gin.Context) {
 		newCount++
 	}
 
-	// Compute embeddings from any newly uploaded images
+	// Compute embeddings from any newly uploaded images (via Jetson GPU embedding server)
 	baseDir := getUploadDirBase()
 	for _, relURL := range uploaded {
 		rel := strings.TrimPrefix(relURL, "/uploads/")
 		absPath := filepath.Join(baseDir, rel)
-		emb, embErr := computeFaceEmbedding(absPath)
+		imageData, readErr := os.ReadFile(absPath)
+		if readErr != nil {
+			log.Printf("WARN: could not read image for embedding: %v", readErr)
+			continue
+		}
+		emb, embErr := computeFaceEmbeddingOnJetson(imageData)
 		if embErr != nil {
+			log.Printf("WARN: Jetson embedding failed: %v", embErr)
 			continue
 		}
 		embeddings = append(embeddings, emb)

@@ -116,7 +116,7 @@ class LivePreviewWebSocketClient:
                 with self._ws_lock:
                     self._ws = None
             if not self._stop.is_set():
-                time.sleep(5)  # reconnect delay
+                time.sleep(2)  # reconnect delay
 
     def _start_connection(self):
         t = threading.Thread(target=self._run_loop, daemon=True, name=f"WSPub-{self.camera_id[:8]}")

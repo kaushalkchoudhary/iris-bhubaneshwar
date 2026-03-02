@@ -49,12 +49,8 @@ def inference_worker(
     batch_size = config.get('batch_size', 16)
     batch_timeout = config.get('batch_timeout', 0.05)
 
-    # Set up logging for this worker
-    log_file = config.get('log_file', 'logs/inference_worker.log')
-    handler = logging.FileHandler(log_file)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    # Logging: use the root handler (stdout/journald) only — no per-camera file.
+    # File-based logging fills disk quickly and is not covered by logrotate.
     logger.setLevel(logging.INFO)
 
     # Initialize the InsightFace model.
@@ -171,7 +167,8 @@ def inference_worker(
                     continue
 
             if frames_added_this_round == 0:
-                time.sleep(0.001)
+                # Nothing arrived — sleep longer to avoid burning CPU in a busy-wait.
+                time.sleep(0.010)
 
         queue_wait_time = time.time() - queue_wait_start
         stats['total_queue_wait_time'] += queue_wait_time
