@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Camera, Maximize2, Minimize2, TrendingUp } from 'lucide-react';
+import { X, Camera, TrendingUp } from 'lucide-react';
 import { Empty, EmptyIcon, EmptyTitle } from '@/components/ui/empty';
 import { apiClient, type CrowdAnalysis } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -14,11 +14,9 @@ interface CrowdDeviceSidebarProps {
 // Video player component (reused from CameraView)
 function VideoPlayer({ src }: { src: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [hasError, setHasError] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const hlsUrl = `${src}/index.m3u8`;
 
@@ -80,10 +78,6 @@ function VideoPlayer({ src }: { src: string }) {
   const handleInteraction = async (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (isFullscreen) {
-      setIsFullscreen(false);
-      return;
-    }
     const video = videoRef.current;
     if (video && !isPlaying) {
       try {
@@ -112,19 +106,8 @@ function VideoPlayer({ src }: { src: string }) {
     };
   }, []);
 
-  const toggleFullscreen = () => setIsFullscreen((prev) => !prev);
-
   return (
-    <div 
-      ref={containerRef}
-      className={cn(
-        "relative w-full bg-zinc-900 overflow-hidden",
-        isFullscreen
-          ? "fixed inset-0 z-[90] rounded-none"
-          : "aspect-video rounded-lg"
-      )}
-      onClick={isFullscreen ? () => setIsFullscreen(false) : undefined}
-    >
+    <div className={cn("relative w-full bg-zinc-900 overflow-hidden aspect-video rounded-lg")}>
       {hasError && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-red-900/50">
           <div className="text-center">
@@ -143,24 +126,6 @@ function VideoPlayer({ src }: { src: string }) {
         onClick={handleInteraction}
         onTouchStart={handleInteraction}
       />
-      {/* Fullscreen button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          toggleFullscreen();
-        }}
-        className="absolute top-2 right-2 z-10 p-2 bg-black/70 hover:bg-black/90 rounded-lg h-auto w-auto"
-        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-      >
-        {isFullscreen ? (
-          <Minimize2 className="w-4 h-4 text-white" />
-        ) : (
-          <Maximize2 className="w-4 h-4 text-white" />
-        )}
-      </Button>
     </div>
   );
 }

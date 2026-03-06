@@ -1,8 +1,9 @@
-import { Monitor, ScanFace, X, Cpu, Wifi } from 'lucide-react';
+import { Monitor, ScanFace, X, Cpu, Wifi, Maximize2 } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { MatchThumbnail, type CrowdAlert } from './FRSShared';
 import type { Person } from '@/lib/api';
-import WebSocketVideoFrame from '@/components/cameras/WebSocketVideoFrame';
+import { DirectWebRTCFrame } from '@/components/cameras/DirectWebRTCFrame';
 import { cn } from '@/lib/utils';
 
 interface LiveMonitorTabProps {
@@ -11,6 +12,7 @@ interface LiveMonitorTabProps {
     jetsons: Array<{
         workerId: string;
         name: string;
+        ip?: string;
         reachable: boolean;
         cameraCount: number;
         resources?: { cpu_load_1m?: number; memory_percent?: number; temperature_c?: number };
@@ -32,6 +34,8 @@ export function LiveMonitorTab({
     onAddToGallery,
     onSwitchTab
 }: LiveMonitorTabProps) {
+    const [zoomed, setZoomed] = useState<{ ip?: string; id: string; name: string; streamPath?: string } | null>(null);
+
     return (
         <div className="h-full m-0 flex flex-col lg:flex-row gap-4 overflow-hidden">
             <div className="w-full lg:w-72 xl:w-80 flex flex-col shrink-0 bg-zinc-900/20 border border-white/5 backdrop-blur-sm overflow-hidden max-h-[320px] lg:max-h-none relative rounded-xl">
@@ -105,7 +109,7 @@ export function LiveMonitorTab({
                     <div className="flex-1 overflow-y-auto pr-1 iris-scroll-area">
                         <div className="space-y-8 pb-4">
                             {jetsons.map(jetson => {
-                                const cameras = camerasByWorker[jetson.workerId] ?? [];
+                                const cameras = (camerasByWorker[jetson.workerId] ?? []).map((c) => ({ ...c, streamPath: undefined as string | undefined }));
                                 return (
                                     <div key={jetson.workerId} className="group/worker">
                                         <div className="flex items-center gap-3 mb-4 px-1">
@@ -130,12 +134,10 @@ export function LiveMonitorTab({
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                                                     {cameras.map(cam => (
                                                         <div key={cam.id} className="relative aspect-video rounded-xl overflow-hidden group/cam transition-all border border-white/5 hover:border-indigo-500/30 bg-black/20">
-                                                            <WebSocketVideoFrame
-                                                                workerId={jetson.workerId}
+                                                            <DirectWebRTCFrame
+                                                                workerIp={jetson.ip}
                                                                 cameraId={cam.id}
-                                                                serviceFilter="frs"
-                                                                enabledServices={['frs']}
-                                                                showOverlays={false}
+                                                                streamPath={cam.streamPath}
                                                                 className="w-full h-full object-cover transition-transform duration-700 group-hover/cam:scale-105"
                                                             />
 
@@ -164,6 +166,14 @@ export function LiveMonitorTab({
                                                                     <Monitor className="h-3 w-3 text-indigo-400/40" />
                                                                 </div>
                                                             </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setZoomed({ ip: jetson.ip, id: cam.id, name: cam.name, streamPath: cam.streamPath })}
+                                                                className="absolute top-2.5 right-2.5 z-10 h-6 w-6 rounded border border-white/15 bg-black/55 text-indigo-300 hover:bg-black/70 flex items-center justify-center"
+                                                                title="Expand feed"
+                                                            >
+                                                                <Maximize2 className="h-3.5 w-3.5" />
+                                                            </button>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -176,6 +186,27 @@ export function LiveMonitorTab({
                     </div>
                 )}
             </div>
+
+            {zoomed && (
+                <div
+                    className="fixed inset-0 z-[90] bg-black/85 backdrop-blur-sm p-4 md:p-8"
+                    onClick={() => setZoomed(null)}
+                >
+                    <div className="relative w-full h-full max-w-[1600px] mx-auto rounded-xl overflow-hidden border border-white/10 bg-black">
+                        <div className="absolute top-3 left-3 z-10 pointer-events-none">
+                            <div className="bg-black/65 rounded px-2 py-0.5">
+                                <p className="text-xs text-white font-medium truncate max-w-[70vw]">{zoomed.name}</p>
+                            </div>
+                        </div>
+                        <DirectWebRTCFrame
+                            workerIp={zoomed.ip}
+                            cameraId={zoomed.id}
+                            streamPath={zoomed.streamPath}
+                            className="w-full h-full"
+                        />
+                    </div>
+                </div>
+            )}
         </div >
     );
 }

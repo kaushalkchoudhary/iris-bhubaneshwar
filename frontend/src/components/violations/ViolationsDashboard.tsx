@@ -14,6 +14,7 @@ import { ImageModal } from '@/components/ui/image-modal';
 import { pdf } from '@react-pdf/renderer';
 import { ViolationsReportPDF } from './ViolationsReportPDF';
 import { recordReportEvent } from '@/lib/reportHistory';
+import { saveReportBlob } from '@/lib/reportStorage';
 
 export function ViolationsDashboard() {
   const [violations, setViolations] = useState<TrafficViolation[]>([]);
@@ -100,7 +101,7 @@ export function ViolationsDashboard() {
       const ownerPhone = approved.plateNumber
         ? await apiClient.fetchRCToMobile(approved.plateNumber).catch(() => null)
         : null;
-      sendWhatsAppNotification(approved, ownerPhone ?? undefined).catch(() => {});
+      sendWhatsAppNotification(approved, ownerPhone ?? undefined).catch(() => { });
       fetchViolations();
       if (selectedViolation?.id === id) {
         setSelectedViolation(null);
@@ -181,7 +182,9 @@ export function ViolationsDashboard() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      recordReportEvent({
+
+      // Record in history first to get the generated ID
+      const entry = recordReportEvent({
         title: reportTitle,
         module: 'ITMS',
         route: '/itms/anpr',
@@ -194,6 +197,9 @@ export function ViolationsDashboard() {
           filename,
         }),
       });
+
+      // Save to IndexedDB using the record's ID for persistent viewing on Reports page
+      await saveReportBlob(entry.id, blob);
     } catch (err) {
       console.error('Failed to generate report:', err);
       alert('Failed to generate report PDF');
@@ -356,21 +362,21 @@ export function ViolationsDashboard() {
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-sm font-mono text-white">
-                        {violation.plateNumber || 'UNKNOWN'}
-                      </span>
-                      <HudBadge variant={getViolationTypeVariant(violation.violationType)}>
-                        {violation.violationType}
+                          {violation.plateNumber || 'UNKNOWN'}
+                        </span>
+                        <HudBadge variant={getViolationTypeVariant(violation.violationType)}>
+                          {violation.violationType}
+                        </HudBadge>
+                      </div>
+                      <HudBadge
+                        variant={
+                          violation.status === 'APPROVED' ? 'success' :
+                            violation.status === 'REJECTED' ? 'danger' :
+                              violation.status === 'FINED' ? 'info' : 'warning'
+                        }
+                      >
+                        {violation.status}
                       </HudBadge>
-                  </div>
-                  <HudBadge
-                    variant={
-                      violation.status === 'APPROVED' ? 'success' :
-                        violation.status === 'REJECTED' ? 'danger' :
-                          violation.status === 'FINED' ? 'info' : 'warning'
-                    }
-                  >
-                    {violation.status}
-                  </HudBadge>
                     </div>
                     <div className="text-xs text-zinc-400 flex items-center gap-1">
                       <Calendar className="w-3 h-3" />

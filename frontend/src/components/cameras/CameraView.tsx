@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { apiClient, type Device } from '@/lib/api';
 import {
   Camera, ChevronDown, ChevronRight, LayoutGrid,
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { HudBadge } from '@/components/ui/hud-badge';
 import { useCameraGrid } from '@/contexts/CameraGridContext';
 import { cn } from '@/lib/utils';
-import { WebSocketVideoFrame } from './WebSocketVideoFrame';
+import { DirectWebRTCFrame } from './DirectWebRTCFrame';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,15 +24,6 @@ interface GridSlot {
   deviceId: string | null;
   device: Device | null;
   fullscreenRef?: React.RefObject<(() => void) | undefined>;
-}
-
-interface StreamMetric {
-  connected: boolean;
-  fps: number;
-  detections: number;
-  lastFrameAgeMs: number | null;
-  reconnects: number;
-  error: string | null;
 }
 
 // ─── No-Jetson placeholder ────────────────────────────────────────────────────
@@ -63,7 +54,6 @@ export function CameraView() {
   const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number } | null>(null);
   const [touchDraggedDevice, setTouchDraggedDevice] = useState<Device | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [streamMetrics, setStreamMetrics] = useState<Record<string, StreamMetric>>({});
 
   const gridDimensions = useMemo(() => {
     const [cols, rows] = gridSize.split('x').map(Number);
@@ -159,6 +149,14 @@ export function CameraView() {
     return [...known, ...rest];
   }, [workers, camerasByWorker]);
 
+  const workerIpMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const w of workers) {
+      map.set(w.id, w.ip);
+    }
+    return map;
+  }, [workers]);
+
   // ── Grid / Drag helpers ───────────────────────────────────────────────────
 
   const saveGrid = (slots: GridSlot[]) => {
@@ -201,10 +199,6 @@ export function CameraView() {
     const idx = gridSlots.findIndex((s) => !s.device);
     handleDrop(idx !== -1 ? idx : 0, device);
   };
-
-  const handleStreamMetrics = useCallback((cameraId: string, metrics: StreamMetric) => {
-    setStreamMetrics((prev) => ({ ...prev, [cameraId]: metrics }));
-  }, []);
 
   // Touch drag
   const handleTouchStart = (e: React.TouchEvent, device: Device) => {
@@ -362,30 +356,20 @@ export function CameraView() {
                       </div>
                     </div>
 
-                    {/* FPS indicator - moved to top-right */}
+                    {/* LIVE indicator - moved to top-right */}
                     <div className="absolute top-2 right-2 z-10 pointer-events-none">
-                      <div className={cn(
-                        "backdrop-blur-sm rounded px-1.5 py-0.5 w-fit border transition-colors",
-                        (streamMetrics[slot.device.id]?.fps ?? 0) > 20
-                          ? "bg-indigo-500/20 border-indigo-500/30"
-                          : "bg-zinc-800/40 border-white/10"
-                      )}>
-                        <p className="text-[10px] text-indigo-300 font-bold font-mono tracking-tight">
-                          {streamMetrics[slot.device.id]?.fps ?? 0} FPS
-                        </p>
+                      <div className="bg-red-500/15 border border-red-500/30 rounded px-1.5 py-0.5 w-fit">
+                        <p className="text-[10px] text-red-300 font-bold font-mono tracking-tight">LIVE</p>
                       </div>
                     </div>
 
                     {/* Video feed */}
                     <div className="flex-1 relative">
                       {slot.device.workerId ? (
-                        <WebSocketVideoFrame
-                          workerId={slot.device.workerId}
+                        <DirectWebRTCFrame
+                          workerIp={workerIpMap.get(slot.device.workerId)}
                           cameraId={slot.device.id}
-                          showOverlays={false}
-                          enabledServices={[]}
-                          serviceFilter=""
-                          onMetrics={(m) => handleStreamMetrics(slot.device!.id, m)}
+                          streamPath={String(slot.device.metadata?.webrtcPath || '') || undefined}
                           className="w-full h-full"
                         />
                       ) : (
@@ -401,7 +385,7 @@ export function CameraView() {
                           variant="ghost" size="icon"
                           onClick={() => setZoomedDevice(slot.device)}
                           className="h-6 w-6 p-0 bg-white/5 hover:bg-white/10 border border-white/10 rounded"
-                          title="Zoom feed"
+                          title="Expand feed"
                         >
                           <Maximize2 className="w-3 h-3 text-indigo-300" />
                         </Button>
@@ -432,10 +416,10 @@ export function CameraView() {
 
       {zoomedDevice && (
         <div
-          className="fixed inset-0 z-[80] bg-black/90 backdrop-blur-sm p-3 md:p-6"
+          className="fixed inset-0 z-[80] bg-black/85 backdrop-blur-sm p-4 md:p-8"
           onClick={() => setZoomedDevice(null)}
         >
-          <div className="relative w-full h-full rounded-xl overflow-hidden border border-white/10 bg-black">
+          <div className="relative w-full h-full max-w-[1600px] mx-auto rounded-xl overflow-hidden border border-white/10 bg-black">
             <div className="absolute top-3 left-3 z-10 pointer-events-none">
               <div className="bg-black/65 rounded px-2 py-0.5">
                 <p className="text-xs text-white font-medium truncate max-w-[70vw]">
@@ -444,13 +428,10 @@ export function CameraView() {
               </div>
             </div>
             {zoomedDevice.workerId ? (
-              <WebSocketVideoFrame
-                workerId={zoomedDevice.workerId}
+              <DirectWebRTCFrame
+                workerIp={workerIpMap.get(zoomedDevice.workerId)}
                 cameraId={zoomedDevice.id}
-                showOverlays={false}
-                enabledServices={[]}
-                serviceFilter=""
-                onMetrics={(m) => handleStreamMetrics(zoomedDevice.id, m)}
+                streamPath={String(zoomedDevice.metadata?.webrtcPath || '') || undefined}
                 className="w-full h-full"
               />
             ) : (
@@ -459,6 +440,7 @@ export function CameraView() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

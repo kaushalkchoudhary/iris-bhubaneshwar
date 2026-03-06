@@ -158,7 +158,7 @@ export function CrowdFRSPage() {
 
   // Jetson workers + cameras for live feed
   const [jetsons, setJetsons] = useState<Array<{
-    workerId: string; name: string; reachable: boolean; cameraCount: number;
+    workerId: string; name: string; ip?: string; reachable: boolean; cameraCount: number;
     resources?: { cpu_load_1m?: number; memory_percent?: number; temperature_c?: number };
   }>>([]);
   const [camerasByWorker, setCamerasByWorker] = useState<Record<string, Array<{ id: string; name: string }>>>({});
@@ -202,6 +202,7 @@ export function CrowdFRSPage() {
         setJetsons(statsRes.workers.map(w => ({
           workerId: w.workerId,
           name: w.name,
+          ip: w.ip,
           reachable: w.reachable,
           cameraCount: w.cameraCount,
           resources: w.resources ?? undefined,

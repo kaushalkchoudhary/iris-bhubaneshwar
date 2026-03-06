@@ -8,6 +8,10 @@ interface WebRTCPlayerProps {
 export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const pcRef = useRef<RTCPeerConnection | null>(null);
+    const whepUrl = (() => {
+        const base = streamUrl.replace(/\/+$/, '');
+        return base.endsWith('/whep') ? base : `${base}/whep`;
+    })();
 
     useEffect(() => {
         let isActive = true;
@@ -15,7 +19,7 @@ export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className
 
         const connectStream = () => {
             if (!isActive) return;
-            console.log(`[WebRTC] Connecting to ${streamUrl}`);
+            console.log(`[WebRTC] Connecting to ${whepUrl}`);
 
             let pc = new RTCPeerConnection({
                 iceServers: [
@@ -26,7 +30,6 @@ export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className
             pcRef.current = pc;
 
             pc.addTransceiver('video', { direction: 'recvonly' });
-            pc.addTransceiver('audio', { direction: 'recvonly' });
 
             pc.ontrack = (event) => {
                 if (videoRef.current) {
@@ -66,7 +69,7 @@ export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className
                 .then(() => waitForIce())
                 .then(() => {
                     console.log(`[WebRTC] ICE gathered (${pc.iceGatheringState}), sending offer`);
-                    return fetch(streamUrl, {
+                    return fetch(whepUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/sdp' },
                         body: pc.localDescription?.sdp
@@ -100,7 +103,7 @@ export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className
                 pcRef.current = null;
             }
         };
-    }, [streamUrl]);
+    }, [whepUrl]);
 
     return (
         <video

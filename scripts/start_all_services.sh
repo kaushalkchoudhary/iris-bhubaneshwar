@@ -70,11 +70,41 @@ kill_by_pattern "uvicorn anpr_vcc.api_server:app"
 sleep 1
 ensure_databases
 
+ensure_frontend_deps() {
+  local frontend_dir="${ROOT_DIR}/frontend"
+  if [[ -x "${frontend_dir}/node_modules/.bin/vite" ]]; then
+    return 0
+  fi
+  echo "Installing frontend dependencies (vite missing)..." >&2
+  (
+    cd "${frontend_dir}"
+    npm install
+  )
+}
+
+# Resolve DB URLs (prefer explicit env, then local defaults based on open ports).
 if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "ERROR: no PostgreSQL detected on 5433 or 5432 and DATABASE_URL is unset." >&2
-  echo "Set DATABASE_URL in backend/.env or install/start Docker Desktop, then retry." >&2
+  if is_port_listening 5433; then
+    DATABASE_URL="postgresql://bhubaneswar_frs_user:GsDZFXCfj9Gb24sztopUwEr8@127.0.0.1:5433/bhubaneswar?sslmode=disable"
+  elif is_port_listening 5432; then
+    DATABASE_URL="postgresql://bhubaneswar_frs_user:GsDZFXCfj9Gb24sztopUwEr8@127.0.0.1:5432/bhubaneswar?sslmode=disable"
+  fi
+fi
+if [[ -z "${FRS_DATABASE_URL:-}" ]]; then
+  if is_port_listening 5434; then
+    FRS_DATABASE_URL="postgresql://iris:iris_dev_password@127.0.0.1:5434/irisfrs?sslmode=disable"
+  elif is_port_listening 5432; then
+    FRS_DATABASE_URL="${DATABASE_URL:-postgresql://iris:iris_dev_password@127.0.0.1:5432/irisfrs?sslmode=disable}"
+  fi
+fi
+
+if [[ -z "${DATABASE_URL:-}" || -z "${FRS_DATABASE_URL:-}" ]]; then
+  echo "ERROR: could not resolve DATABASE_URL/FRS_DATABASE_URL." >&2
+  echo "Set them in backend/.env or start db containers, then retry." >&2
   exit 1
 fi
+
+ensure_frontend_deps
 
 echo "DATE_DIR=${DATE_DIR}" > "${PID_FILE}"
 echo "FRONTEND_PORT=${FRONTEND_PORT}" >> "${PID_FILE}"
@@ -84,7 +114,7 @@ echo "LOCAL_INFERENCE_ENABLED=${LOCAL_INFERENCE_ENABLED}" >> "${PID_FILE}"
 
 (
   cd "${ROOT_DIR}/frontend"
-  nohup env VITE_BACKEND_URL="http://localhost:${BACKEND_PORT}" npm run dev -- --port "${FRONTEND_PORT}" > "${DATE_DIR}/frontend.log" 2>&1 &
+  nohup env VITE_BACKEND_URL="http://localhost:${BACKEND_PORT}" npm run dev -- --host 0.0.0.0 --port "${FRONTEND_PORT}" > "${DATE_DIR}/frontend.log" 2>&1 < /dev/null &
   echo "FRONTEND_PID=$!" >> "${PID_FILE}"
 )
 
@@ -97,9 +127,10 @@ echo "LOCAL_INFERENCE_ENABLED=${LOCAL_INFERENCE_ENABLED}" >> "${PID_FILE}"
     set +a
   fi
 
-  # Use resolved URLs if available, otherwise fall back to .env or hardcoded defaults
-  DATABASE_URL="${DATABASE_URL:-postgresql://bhubaneswar_frs_user:GsDZFXCfj9Gb24sztopUwEr8@127.0.0.1:5433/bhubaneswar?sslmode=disable}"
-  FRS_DATABASE_URL="${FRS_DATABASE_URL:-postgresql://iris:iris_dev_password@127.0.0.1:5434/irisfrs?sslmode=disable}"
+  BACKEND_CMD=(go run main.go)
+  if [[ -x "${ROOT_DIR}/backend/go-backend" ]]; then
+    BACKEND_CMD=("${ROOT_DIR}/backend/go-backend")
+  fi
 
   nohup env \
     DATABASE_URL="${DATABASE_URL}" \
@@ -112,7 +143,7 @@ echo "LOCAL_INFERENCE_ENABLED=${LOCAL_INFERENCE_ENABLED}" >> "${PID_FILE}"
     PORT="${BACKEND_PORT}" \
     BIND_ADDR=0.0.0.0 \
     GOCACHE=/tmp/go-build-cache \
-    go run main.go > "${DATE_DIR}/go-backend.log" 2>&1 &
+    "${BACKEND_CMD[@]}" > "${DATE_DIR}/go-backend.log" 2>&1 < /dev/null &
   echo "BACKEND_PID=$!" >> "${PID_FILE}"
 )
 
@@ -132,6 +163,19 @@ if [[ "${LOCAL_INFERENCE_ENABLED}" == "1" ]]; then
         > "${DATE_DIR}/inference-launcher.log" 2>&1 &
     echo "INFERENCE_PID=$!" >> "${PID_FILE}"
   )
+fi
+
+# Validate that started services are still alive after a short warmup.
+sleep 2
+source "${PID_FILE}"
+if ! kill -0 "${FRONTEND_PID}" 2>/dev/null; then
+  echo "ERROR: frontend process exited immediately (pid ${FRONTEND_PID})." >&2
+  echo "Check log: ${DATE_DIR}/frontend.log" >&2
+  exit 1
+fi
+if ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
+  echo "WARN: backend process exited immediately (pid ${BACKEND_PID})." >&2
+  echo "Check log: ${DATE_DIR}/go-backend.log" >&2
 fi
 
 cat <<MSG

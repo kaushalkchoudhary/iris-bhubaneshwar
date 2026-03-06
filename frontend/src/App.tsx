@@ -25,6 +25,7 @@ import { SettingsPage } from './components/settings/SettingsPage';
 import { OperatorAccessPage } from './components/settings/OperatorAccessPage';
 import { AnalyticsPage } from './components/analytics/AnalyticsPage';
 import { ReportsPage } from './components/reports/ReportsPage';
+import { GodsEyePage } from './components/godseye/GodsEyePage';
 
 function PageLoader() {
   return (
@@ -71,6 +72,7 @@ function App() {
                         } />
                         <Route path="frs/*" element={<Suspense fallback={<PageLoader />}><CrowdFRSPage /></Suspense>} />
                         <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><AnalyticsPage /></Suspense>} />
+                        <Route path="gods-eye" element={<Suspense fallback={<PageLoader />}><GodsEyePage /></Suspense>} />
                         <Route path="reports" element={<Suspense fallback={<PageLoader />}><ReportsPage /></Suspense>} />
                         <Route path="analytics/alerts" element={<Suspense fallback={<PageLoader />}><AlertsPage /></Suspense>} />
                         <Route path="settings/*" element={

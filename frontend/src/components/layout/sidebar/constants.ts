@@ -1,6 +1,6 @@
 import {
   ScanFace, Monitor,
-  BarChart3, Settings, Shield, Server, FileText, Bell,
+  BarChart3, Settings, Shield, Server, FileText, Bell, Radar,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -52,6 +52,7 @@ export const menuSections: MenuSection[] = [
     label: 'Analytics',
     items: [
       { id: 'analytics-dashboard', path: '/dashboard', label: 'Dashboard', icon: BarChart3, description: 'Global analytics dashboard' },
+      { id: 'gods-eye', path: '/gods-eye', label: "God's Eye (YOLOE)", icon: Radar, description: 'Promptable YOLOE live inference cockpit' },
       { id: 'alerts', path: '/analytics/alerts', label: 'Alerts', icon: Bell, description: 'Unread and historical alert activity' },
       { id: 'reports-page', path: '/reports', label: 'Reports', icon: FileText, description: 'Internal reports sitemap' },
     ],
