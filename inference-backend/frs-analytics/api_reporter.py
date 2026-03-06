@@ -184,25 +184,78 @@ def api_reporter(
                     stats['camera_stats'][camera_id]['duplicates'] += 1
                     continue
 
-                # Snapshot: resize to 480px height for storage/bandwidth efficiency
-                resize_height = api_config.get('full_frame_resize_height', 480)
+                # Encode snapshot with bboxes drawn for visual clarity
+                resize_height = api_config.get('full_frame_resize_height', 0)
+                jpeg_quality = api_config.get('jpeg_quality', 85)
+                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
 
+                frame_to_encode = frame.copy()
+                scale_x = scale_y = 1.0
                 if resize_height and isinstance(resize_height, int):
                     try:
                         h, w = frame.shape[:2]
-                        new_w = int((resize_height / h) * w)
-                        frame_to_encode = cv2.resize(frame, (new_w, resize_height), interpolation=cv2.INTER_AREA)
+                        if h > resize_height:
+                            new_w = int((resize_height / h) * w)
+                            frame_to_encode = cv2.resize(frame.copy(), (new_w, resize_height), interpolation=cv2.INTER_AREA)
+                            scale_x = new_w / w
+                            scale_y = resize_height / h
                     except Exception as e:
                         logger.warning(f"[{camera_id}] Failed to resize frame: {e}")
-                        frame_to_encode = frame
-                else:
-                    frame_to_encode = frame
 
-                jpeg_quality = api_config.get('jpeg_quality', 75)
-                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
+                # Draw face mesh - curved lines blended transparently onto face
+                primary_bbox = tuple(map(int, face_to_report['bbox']))
+                overlay = frame_to_encode.copy()
+                for other_face in faces:
+                    try:
+                        fb = other_face.get('bbox', [])
+                        if not fb or len(fb) < 4:
+                            continue
+                        fx1, fy1, fx2, fy2 = map(int, fb)
+                        sx1 = int(fx1 * scale_x); sy1 = int(fy1 * scale_y)
+                        sx2 = int(fx2 * scale_x); sy2 = int(fy2 * scale_y)
+                        is_primary = (fx1, fy1, fx2, fy2) == primary_bbox
+                        color = (0, 255, 0) if is_primary else (140, 140, 140)
+                        cx = (sx1 + sx2) // 2
+                        cy = (sy1 + sy2) // 2
+                        ax = max(1, int((sx2 - sx1) / 2 * 1.08))
+                        ay = max(1, int((sy2 - sy1) / 2 * 1.08))
+                        step = max(4, (ax + ay) // 7)
+                        curve = 0.28  # lines bow inward at centre (convex-face illusion)
+                        seg = 12      # polyline points per curve
+                        # Curved horizontal lines clipped to face ellipse
+                        for dy in range(-ay, ay + 1, step):
+                            tc = dy / ay
+                            if abs(tc) >= 1.0:
+                                continue
+                            x_half = ax * (1.0 - tc * tc) ** 0.5
+                            pts_h = []
+                            for i in range(seg + 1):
+                                xn = -1.0 + 2.0 * i / seg
+                                pts_h.append([int(cx + xn * x_half),
+                                              int(cy + dy * (1.0 - curve * (1.0 - xn * xn)))])
+                            cv2.polylines(overlay, [np.array(pts_h, np.int32)], False, color, 1)
+                        # Curved vertical lines clipped to face ellipse
+                        for dx in range(-ax, ax + 1, step):
+                            tc = dx / ax
+                            if abs(tc) >= 1.0:
+                                continue
+                            y_half = ay * (1.0 - tc * tc) ** 0.5
+                            pts_v = []
+                            for i in range(seg + 1):
+                                yn = -1.0 + 2.0 * i / seg
+                                pts_v.append([int(cx + dx * (1.0 - curve * (1.0 - yn * yn))),
+                                              int(cy + yn * y_half)])
+                            cv2.polylines(overlay, [np.array(pts_v, np.int32)], False, color, 1)
+                        # Ellipse outline
+                        cv2.ellipse(overlay, (cx, cy), (ax, ay), 0, 0, 360, color, 1)
+                    except Exception:
+                        pass
+                # Blend mesh at 35% opacity — face fully visible through grid
+                cv2.addWeighted(overlay, 0.35, frame_to_encode, 0.65, 0, frame_to_encode)
+
                 _, frame_encoded = cv2.imencode('.jpg', frame_to_encode, encode_params)
 
-                # Face crop: only for known persons; frontend draws its own bboxes
+                # Face crop: only for known persons
                 face_crop_encoded = None
                 if is_known:
                     x1, y1, x2, y2 = map(int, face_to_report['bbox'])

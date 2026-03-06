@@ -15,7 +15,7 @@ export function AnalyticsReporting() {
   const [vehicleStats, setVehicleStats] = useState<VehicleStats | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d'>('7d');
+  const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d' | 'all'>('7d');
   const [activeTab, setActiveTab] = useState('trends');
 
   const fetchData = async () => {
@@ -33,6 +33,9 @@ export function AnalyticsReporting() {
           break;
         case '30d':
           startTime.setDate(startTime.getDate() - 30);
+          break;
+        case 'all':
+          startTime.setFullYear(2020, 0, 1);
           break;
       }
 
@@ -123,6 +126,7 @@ export function AnalyticsReporting() {
                 <TabsTrigger value="24h" className="text-xs">24H</TabsTrigger>
                 <TabsTrigger value="7d" className="text-xs">7D</TabsTrigger>
                 <TabsTrigger value="30d" className="text-xs">30D</TabsTrigger>
+                <TabsTrigger value="all" className="text-xs">ALL</TabsTrigger>
               </TabsList>
             </Tabs>
             <Button variant="secondary" onClick={handleExport}>

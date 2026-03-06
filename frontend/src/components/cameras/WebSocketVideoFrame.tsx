@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Wifi, WifiOff } from 'lucide-react';
 
 interface Detection {
   type: string;
@@ -17,6 +16,14 @@ interface WebSocketVideoFrameProps {
   serviceFilter?: string;
   className?: string;
   onConnectionChange?: (connected: boolean) => void;
+  onMetrics?: (metrics: {
+    connected: boolean;
+    fps: number;
+    detections: number;
+    lastFrameAgeMs: number | null;
+    reconnects: number;
+    error: string | null;
+  }) => void;
 }
 
 // Global WebSocket connection (shared across all video frames)
@@ -24,6 +31,9 @@ let globalWs: WebSocket | null = null;
 let wsConnecting = false;
 const wsSubscribers = new Map<string, Set<(data: ArrayBuffer | Detection[]) => void>>();
 let reconnectTimeout: number | null = null;
+let reconnectDelayMs = 800;
+let wsReconnectCount = 0;
+let wsManualClose = false;
 
 function getWsUrl(): string {
   // Connect to backend WebSocket
@@ -38,6 +48,7 @@ function connectWebSocket() {
   }
 
   wsConnecting = true;
+  wsManualClose = false;
   const ws = new WebSocket(getWsUrl());
   ws.binaryType = 'arraybuffer';
 
@@ -45,6 +56,7 @@ function connectWebSocket() {
     console.log('📺 WebSocket connected to feed hub');
     globalWs = ws;
     wsConnecting = false;
+    reconnectDelayMs = 800;
 
     // Re-subscribe to all cameras
     wsSubscribers.forEach((_, cameraKey) => {
@@ -87,17 +99,22 @@ function connectWebSocket() {
   };
 
   ws.onclose = () => {
-    console.log('📺 WebSocket disconnected');
+    if (!wsManualClose) {
+      console.log('📺 WebSocket disconnected');
+    }
     globalWs = null;
     wsConnecting = false;
+    wsReconnectCount += 1;
 
     // Reconnect after delay
     if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    const delay = reconnectDelayMs;
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5000);
     reconnectTimeout = window.setTimeout(() => {
       if (wsSubscribers.size > 0) {
         connectWebSocket();
       }
-    }, 3000);
+    }, delay);
   };
 
   ws.onerror = (error) => {
@@ -127,7 +144,7 @@ function unsubscribe(cameraKey: string, handler: (data: ArrayBuffer | Detection[
     handlers.delete(handler);
     if (handlers.size === 0) {
       wsSubscribers.delete(cameraKey);
-      
+
       // Send unsubscribe message
       if (globalWs?.readyState === WebSocket.OPEN) {
         globalWs.send(JSON.stringify({ type: 'unsubscribe', camera: cameraKey }));
@@ -137,6 +154,7 @@ function unsubscribe(cameraKey: string, handler: (data: ArrayBuffer | Detection[
 
   // Disconnect if no more subscribers
   if (wsSubscribers.size === 0 && globalWs) {
+    wsManualClose = true;
     globalWs.close();
     globalWs = null;
   }
@@ -150,6 +168,7 @@ export function WebSocketVideoFrame({
   serviceFilter = 'all',
   className = '',
   onConnectionChange,
+  onMetrics,
 }: WebSocketVideoFrameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [connected, setConnected] = useState(false);
@@ -157,6 +176,7 @@ export function WebSocketVideoFrame({
   const [fps, setFps] = useState<number>(0);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [reconnects, setReconnects] = useState(0);
   const frameCountRef = useRef(0);
   const lastFpsUpdateRef = useRef(Date.now());
   const detectionsRef = useRef<Detection[]>([]);
@@ -255,7 +275,7 @@ export function WebSocketVideoFrame({
   // Subscribe/unsubscribe on mount/unmount
   useEffect(() => {
     subscribe(cameraKey, handleData);
-    
+
     return () => {
       unsubscribe(cameraKey, handleData);
     };
@@ -268,8 +288,9 @@ export function WebSocketVideoFrame({
         setConnected(false);
         setError('No frames received');
       }
+      setReconnects(wsReconnectCount);
     }, 1000);
-    
+
     return () => clearInterval(interval);
   }, [lastFrameTime]);
 
@@ -278,38 +299,27 @@ export function WebSocketVideoFrame({
     onConnectionChange?.(connected);
   }, [connected, onConnectionChange]);
 
+  useEffect(() => {
+    if (!onMetrics) return;
+    const age = lastFrameTime ? Math.max(0, Date.now() - lastFrameTime) : null;
+    onMetrics({
+      connected,
+      fps,
+      detections: detections.length,
+      lastFrameAgeMs: age,
+      reconnects,
+      error,
+    });
+  }, [connected, fps, detections.length, lastFrameTime, reconnects, error, onMetrics]);
+
   return (
     <div className={`relative w-full h-full bg-zinc-900 ${className}`}>
       <canvas
         ref={canvasRef}
         className="w-full h-full object-contain"
       />
-      
-      {/* Status overlay */}
-      <div className="absolute top-2 right-2 flex items-center gap-2">
-        {connected ? (
-          <div className="bg-green-500/80 rounded-full px-2 py-0.5 flex items-center gap-1">
-            <Wifi className="w-3 h-3 text-white" />
-            <span className="text-xs text-white font-medium">{fps} fps{detections.length > 0 ? ` · ${detections.length} face${detections.length !== 1 ? 's' : ''}` : ''}</span>
-          </div>
-        ) : (
-          <div className="bg-zinc-800/90 rounded-full px-2 py-0.5 flex items-center gap-1">
-            <WifiOff className="w-3 h-3 text-zinc-400" />
-            <span className="text-xs text-zinc-400 font-medium">No stream</span>
-          </div>
-        )}
-      </div>
 
-      {/* Waiting / error overlay */}
-      {!connected && (
-        <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/80">
-          <div className="text-center">
-            <Camera className="w-10 h-10 text-zinc-600 mx-auto mb-2 animate-pulse" />
-            <p className="text-xs text-zinc-500">Waiting for Jetson stream…</p>
-            {error && <p className="text-[10px] text-red-500 mt-1">{error}</p>}
-          </div>
-        </div>
-      )}
+      {/* Overlays removed to allow parent-level custom HUDs */}
     </div>
   );
 }
@@ -360,22 +370,22 @@ function drawDetections(
 ) {
   detections.forEach((det) => {
     if (!det.bbox) return;
-    
+
     const [x, y, w, h] = det.bbox;
     const color = det.color || getColorForType(det.type);
-    
+
     // Draw box
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, w, h);
-    
+
     // Draw label background
     const label = det.label || `${det.type} ${Math.round(det.confidence * 100)}%`;
     ctx.font = '12px sans-serif';
     const textWidth = ctx.measureText(label).width;
     ctx.fillStyle = color;
     ctx.fillRect(x, y - 18, textWidth + 8, 18);
-    
+
     // Draw label text
     ctx.fillStyle = '#fff';
     ctx.fillText(label, x + 4, y - 5);

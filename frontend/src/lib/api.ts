@@ -505,6 +505,23 @@ class ApiClient {
     return this.request<FRSMatch[]>(`/api/frs/detections${query ? `?${query}` : ''}`);
   }
 
+  async getFRSStats(options?: { startTime?: string; endTime?: string }): Promise<FRSStats> {
+    const params = new URLSearchParams();
+    if (options?.startTime) params.append('startTime', options.startTime);
+    if (options?.endTime) params.append('endTime', options.endTime);
+    const query = params.toString();
+    return this.request<FRSStats>(`/api/frs/stats${query ? `?${query}` : ''}`);
+  }
+
+  async getFRSTimeline(options?: { startTime?: string; endTime?: string; granularity?: 'day' | 'hour' }): Promise<FRSTimelineBucket[]> {
+    const params = new URLSearchParams();
+    if (options?.startTime) params.append('startTime', options.startTime);
+    if (options?.endTime) params.append('endTime', options.endTime);
+    if (options?.granularity) params.append('granularity', options.granularity);
+    const query = params.toString();
+    return this.request<FRSTimelineBucket[]>(`/api/frs/timeline${query ? `?${query}` : ''}`);
+  }
+
   async getFRSGlobalIdentities(options?: {
     limit?: number;
     known?: boolean;
@@ -1321,6 +1338,37 @@ export interface AlertStats {
   read: number;
   today: number;
   byType: Record<string, number>;
+}
+
+export interface FRSDeviceStat {
+  deviceId: string;
+  deviceName: string;
+  count: number;
+}
+
+export interface FRSPersonStat {
+  personId: string;
+  personName: string;
+  faceImageUrl: string;
+  count: number;
+  lastSeen: string;
+  avgConfidence: number;
+}
+
+export interface FRSStats {
+  totalDetections: number;
+  knownDetections: number;
+  unknownDetections: number;
+  avgConfidence: number;
+  byDevice: FRSDeviceStat[];
+  byPerson: FRSPersonStat[];
+}
+
+export interface FRSTimelineBucket {
+  period: string;
+  total: number;
+  known: number;
+  unknown: number;
 }
 
 export interface VehicleStats {

@@ -50,6 +50,15 @@ export default {
       backdropBlur: {
         xs: '2px',
       },
+      keyframes: {
+        'scan-line': {
+          '0%': { transform: 'translateY(-100%)' },
+          '100%': { transform: 'translateY(400%)' },
+        },
+      },
+      animation: {
+        'scan-line': 'scan-line 1.8s linear infinite',
+      },
     },
   },
   plugins: [],

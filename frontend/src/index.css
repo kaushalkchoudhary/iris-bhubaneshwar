@@ -6,74 +6,77 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #f6f8fb;
-  --foreground: #0b1220;
-  --card: #fbfdff;
-  --card-foreground: #09090b;
-  --popover: #ffffff;
-  --popover-foreground: #09090b;
-  --primary: #6366f1;
-  --primary-foreground: #fafafa;
-  --secondary: #eef2f6;
-  --secondary-foreground: #18181b;
-  --muted: #e9edf4;
-  --muted-foreground: #4b5563;
-  --accent: #e6edf7;
-  --accent-foreground: #18181b;
+  --background: #e8f1f8;
+  --foreground: #04111d;
+  --card: #f6fbff;
+  --card-foreground: #04111d;
+  --popover: #f9fdff;
+  --popover-foreground: #04111d;
+  --primary: #03d4ff;
+  --primary-foreground: #00141f;
+  --secondary: #dce8f2;
+  --secondary-foreground: #102133;
+  --muted: #d5e1ec;
+  --muted-foreground: #40556b;
+  --accent: #d8e8f6;
+  --accent-foreground: #102133;
   --destructive: #ef4444;
   --destructive-foreground: #fafafa;
-  --border: #cdd6e1;
-  --input: #cdd6e1;
-  --ring: #6366f1;
-  --radius: 0.625rem;
-  --chart-1: #6366f1;
+  --border: #c9d8e6;
+  --input: #c9d8e6;
+  --ring: #03d4ff;
+  --radius: 0.2rem;
+  --chart-1: #03d4ff;
   --chart-2: #10b981;
   --chart-3: #f59e0b;
-  --chart-4: #3b82f6;
+  --chart-4: #38bdf8;
   --chart-5: #ef4444;
-  --sidebar: #f7f9fc;
-  --sidebar-foreground: #18181b;
-  --sidebar-primary: #6366f1;
-  --sidebar-primary-foreground: #fafafa;
-  --sidebar-accent: #e9edf4;
-  --sidebar-accent-foreground: #18181b;
-  --sidebar-border: #cdd6e1;
-  --sidebar-ring: #6366f1;
+  --sidebar: #eaf2f9;
+  --sidebar-foreground: #102133;
+  --sidebar-primary: #03d4ff;
+  --sidebar-primary-foreground: #00141f;
+  --sidebar-accent: #dbe8f5;
+  --sidebar-accent-foreground: #102133;
+  --sidebar-border: #bed0e0;
+  --sidebar-ring: #03d4ff;
+  --font-ui: "IBM Plex Sans", "Sora", "Segoe UI", sans-serif;
+  --font-display: "Sora", "Rajdhani", "IBM Plex Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .dark {
-  --background: #050505;
-  --foreground: #fafafa;
-  --card: #18181b;
-  --card-foreground: #fafafa;
-  --popover: #18181b;
-  --popover-foreground: #fafafa;
-  --primary: #6366f1;
-  --primary-foreground: #fafafa;
-  --secondary: rgba(255, 255, 255, 0.05);
-  --secondary-foreground: #d4d4d8;
-  --muted: rgba(255, 255, 255, 0.05);
-  --muted-foreground: #a1a1aa;
-  --accent: rgba(255, 255, 255, 0.05);
-  --accent-foreground: #fafafa;
+  --background: #03090f;
+  --foreground: #e5f7ff;
+  --card: #081520;
+  --card-foreground: #e5f7ff;
+  --popover: #081520;
+  --popover-foreground: #e5f7ff;
+  --primary: #16d8ff;
+  --primary-foreground: #02121a;
+  --secondary: #0c1d2c;
+  --secondary-foreground: #b8d3e8;
+  --muted: #0d2131;
+  --muted-foreground: #7e9cb3;
+  --accent: #0e2536;
+  --accent-foreground: #e5f7ff;
   --destructive: #ef4444;
   --destructive-foreground: #fafafa;
-  --border: rgba(255, 255, 255, 0.05);
-  --input: rgba(255, 255, 255, 0.1);
-  --ring: #6366f1;
-  --chart-1: #6366f1;
+  --border: rgba(89, 170, 227, 0.25);
+  --input: rgba(89, 170, 227, 0.32);
+  --ring: #16d8ff;
+  --chart-1: #16d8ff;
   --chart-2: #10b981;
   --chart-3: #f59e0b;
-  --chart-4: #3b82f6;
+  --chart-4: #38bdf8;
   --chart-5: #ef4444;
-  --sidebar: rgba(9, 9, 11, 0.3);
-  --sidebar-foreground: #fafafa;
-  --sidebar-primary: #6366f1;
-  --sidebar-primary-foreground: #fafafa;
-  --sidebar-accent: rgba(255, 255, 255, 0.05);
-  --sidebar-accent-foreground: #f4f4f5;
-  --sidebar-border: rgba(255, 255, 255, 0.05);
-  --sidebar-ring: #6366f1;
+  --sidebar: #050f18;
+  --sidebar-foreground: #c5e8ff;
+  --sidebar-primary: #16d8ff;
+  --sidebar-primary-foreground: #02121a;
+  --sidebar-accent: #0b1c2a;
+  --sidebar-accent-foreground: #e5f7ff;
+  --sidebar-border: rgba(89, 170, 227, 0.25);
+  --sidebar-ring: #16d8ff;
 }
 
 /* DEVMODE accent color utilities */
@@ -93,10 +96,10 @@
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: 'DM Sans', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-ui);
   font-feature-settings: "rlig" 1, "calt" 1;
   font-optical-sizing: auto;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -104,7 +107,7 @@ body {
 code,
 pre,
 [data-mono] {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 /* DEVMODE scrollbar styling */
@@ -142,10 +145,10 @@ pre,
 
 /* DEVMODE glassmorphism */
 .glass {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .dark .glass {
@@ -225,9 +228,9 @@ pre,
 .app-shell-bg {
   position: relative;
   background:
-    radial-gradient(1200px 700px at 20% -10%, rgba(99, 102, 241, 0.14), transparent 55%),
-    radial-gradient(1200px 700px at 100% 110%, rgba(16, 185, 129, 0.1), transparent 58%),
-    linear-gradient(180deg, color-mix(in srgb, var(--background) 94%, #020617) 0%, var(--background) 100%);
+    radial-gradient(1200px 700px at 20% -10%, rgba(22, 216, 255, 0.14), transparent 55%),
+    radial-gradient(1200px 700px at 100% 110%, rgba(77, 142, 255, 0.1), transparent 58%),
+    linear-gradient(180deg, color-mix(in srgb, var(--background) 90%, #03080f) 0%, var(--background) 100%);
 }
 
 .app-shell-bg::before {
@@ -467,20 +470,20 @@ pre,
 /* GLOBAL OVERRIDES for Hardcoded Dark Mode Styles */
 /* These rules force hardcoded dark classes to look 'light' when in .light mode */
 
-.light .bg-zinc-900,
-.light .bg-zinc-950,
-.light .bg-black {
-  background-color: var(--card) !important;
-  color: var(--card-foreground) !important;
+.light [class*="bg-zinc-800"],
+.light [class*="bg-zinc-900"],
+.light [class*="bg-zinc-950"],
+.light [class*="bg-black/"] {
+  background-color: rgba(9, 9, 11, 0.04) !important;
+  border-color: rgba(9, 9, 11, 0.12) !important;
+  backdrop-filter: blur(12px);
 }
 
-.light .bg-zinc-800,
-.light .bg-zinc-900\/30,
-.light .bg-zinc-900\/50,
-.light .bg-zinc-900\/20,
-.light .bg-black\/20 {
-  background-color: var(--muted) !important;
-  border-color: var(--border) !important;
+.light .bg-black,
+.light .bg-zinc-950 {
+  /* Only solid, non-transparent hits this now */
+  background-color: var(--card) !important;
+  color: var(--card-foreground) !important;
 }
 
 .light .text-white,
@@ -493,12 +496,12 @@ pre,
 .light .text-zinc-400,
 .light .text-zinc-500,
 .light .text-zinc-600 {
-  color: var(--muted-foreground) !important;
+  color: #52525b !important;
 }
 
 .light .border-white\/5,
 .light .border-white\/10 {
-  border-color: var(--border) !important;
+  border-color: rgba(9, 9, 11, 0.1) !important;
 }
 
 .light .hover\:bg-zinc-900\/50:hover {
@@ -510,7 +513,8 @@ pre,
   background:
     radial-gradient(1200px 500px at 0% 0%, rgba(59, 130, 246, 0.1), transparent 50%),
     radial-gradient(900px 420px at 100% 100%, rgba(16, 185, 129, 0.08), transparent 55%),
-    #030814;
+    var(--background);
+  /* Fixed to support light mode */
 }
 
 .iris-dashboard-root::before {
@@ -540,10 +544,20 @@ pre,
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 12px rgba(0, 0, 0, 0.25);
 }
 
+/* Light mode overrides for cut tags */
+.light .iris-cut-tag-base {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 0 6px rgba(0, 0, 0, 0.05);
+}
+
 .iris-cut-tag-default {
   color: #dbeafe;
   border-color: rgba(99, 102, 241, 0.65);
   background: linear-gradient(180deg, rgba(99, 102, 241, 0.95), rgba(49, 46, 129, 0.42));
+}
+
+.light .iris-cut-tag-default {
+  color: #312e81;
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.2), rgba(99, 102, 241, 0.05));
 }
 
 .iris-cut-tag-info {
@@ -552,10 +566,20 @@ pre,
   background: linear-gradient(180deg, rgba(59, 130, 246, 0.95), rgba(30, 58, 138, 0.45));
 }
 
+.light .iris-cut-tag-info {
+  color: #1e3a8a;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.05));
+}
+
 .iris-cut-tag-success {
   color: #dcfce7;
   border-color: rgba(16, 185, 129, 0.7);
   background: linear-gradient(180deg, rgba(16, 185, 129, 0.94), rgba(6, 78, 59, 0.45));
+}
+
+.light .iris-cut-tag-success {
+  color: #064e3b;
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.05));
 }
 
 .iris-cut-tag-warning {
@@ -564,14 +588,170 @@ pre,
   background: linear-gradient(180deg, rgba(245, 158, 11, 0.95), rgba(120, 53, 15, 0.48));
 }
 
+.light .iris-cut-tag-warning {
+  color: #78350f;
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.25), rgba(245, 158, 11, 0.05));
+}
+
 .iris-cut-tag-danger {
   color: #fee2e2;
   border-color: rgba(239, 68, 68, 0.72);
   background: linear-gradient(180deg, rgba(239, 68, 68, 0.95), rgba(127, 29, 29, 0.46));
 }
 
+.light .iris-cut-tag-danger {
+  color: #7f1d1d;
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.2), rgba(239, 68, 68, 0.05));
+}
+
 .iris-cut-tag-secondary {
   color: #e4e4e7;
   border-color: rgba(113, 113, 122, 0.66);
   background: linear-gradient(180deg, rgba(113, 113, 122, 0.92), rgba(39, 39, 42, 0.48));
+}
+
+.light .iris-cut-tag-secondary {
+  color: #3f3f46;
+  background: linear-gradient(180deg, rgba(113, 113, 122, 0.15), rgba(113, 113, 122, 0.05));
+}
+
+
+/* FRS visual system */
+.iris-frs-theme {
+  --frs-panel: color-mix(in srgb, var(--card) 84%, transparent);
+  --frs-panel-strong: color-mix(in srgb, var(--card) 72%, transparent);
+  --frs-border: color-mix(in srgb, var(--border) 72%, #2b7da9 28%);
+  --frs-glow: color-mix(in srgb, var(--primary) 82%, #7ce7ff 18%);
+  --frs-text-subtle: color-mix(in srgb, var(--muted-foreground) 86%, #8cc6de 14%);
+  font-family: var(--font-ui);
+  background:
+    radial-gradient(900px 460px at 2% -5%, rgba(22, 216, 255, 0.16), transparent 54%),
+    radial-gradient(900px 460px at 100% 110%, rgba(22, 119, 255, 0.14), transparent 58%),
+    var(--background);
+  /* Fixed to support light mode */
+}
+
+.iris-frs-theme::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.2;
+  background-image:
+    linear-gradient(rgba(81, 181, 221, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(81, 181, 221, 0.18) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.iris-frs-theme::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 16%, transparent 84%, rgba(255, 255, 255, 0.02) 100%);
+}
+
+.iris-frs-theme .iris-scroll-area::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.iris-frs-theme .iris-scroll-area::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--frs-glow), transparent 68%);
+}
+
+.iris-frs-theme .iris-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--frs-glow), transparent 50%);
+}
+
+.iris-frs-theme [class*="bg-zinc-900"],
+.iris-frs-theme [class*="bg-zinc-950"],
+.iris-frs-theme [class*="bg-black/"] {
+  background-color: var(--frs-panel) !important;
+}
+
+.iris-frs-theme [class*="border-white/5"],
+.iris-frs-theme [class*="border-white/10"] {
+  border-color: var(--frs-border) !important;
+}
+
+.iris-frs-theme [class*="text-zinc-500"],
+.iris-frs-theme [class*="text-zinc-600"],
+.iris-frs-theme [class*="text-muted-foreground"] {
+  color: var(--frs-text-subtle) !important;
+}
+
+.iris-frs-theme [class*="text-zinc-100"],
+.iris-frs-theme [class*="text-zinc-200"],
+.iris-frs-theme [class*="text-zinc-300"],
+.iris-frs-theme [class*="text-white"] {
+  color: var(--foreground) !important;
+}
+
+.iris-frs-theme .btn-glass,
+.iris-frs-theme button[class*="bg-cyan-600"],
+.iris-frs-theme button[class*="bg-indigo-500"] {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family: var(--font-display);
+}
+
+.iris-frs-theme input,
+.iris-frs-theme textarea,
+.iris-frs-theme select {
+  border-color: var(--frs-border) !important;
+  background: color-mix(in srgb, var(--frs-panel-strong) 88%, #000 12%) !important;
+  color: var(--foreground) !important;
+  font-family: var(--font-mono);
+}
+
+.iris-frs-theme .radix-dialog-content,
+.iris-frs-theme [role="dialog"] {
+  border-color: var(--frs-border) !important;
+  background: linear-gradient(170deg, color-mix(in srgb, var(--frs-panel) 94%, #06111b), color-mix(in srgb, var(--frs-panel-strong) 92%, #01070c)) !important;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(22, 216, 255, 0.14);
+}
+
+.iris-frs-theme .rounded-xl,
+.iris-frs-theme .rounded-2xl,
+.iris-frs-theme .rounded-3xl {
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.12), 0 14px 28px rgba(0, 0, 0, 0.26);
+}
+
+.iris-tech-theme {
+  background:
+    radial-gradient(1100px 500px at -10% -10%, rgba(22, 216, 255, 0.2), transparent 58%),
+    radial-gradient(1200px 520px at 110% 110%, rgba(8, 112, 255, 0.18), transparent 62%),
+    var(--background);
+  /* Fixed to support light mode */
+}
+
+.iris-tech-theme::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image:
+    linear-gradient(rgba(39, 164, 255, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(39, 164, 255, 0.18) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.iris-tech-theme .rounded-xl,
+.iris-tech-theme .rounded-lg {
+  border-color: rgba(34, 211, 238, 0.22) !important;
+  background-color: rgba(0, 0, 0, 0.6) !important;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.12), 0 14px 28px rgba(0, 0, 0, 0.3);
+}
+
+.iris-dialog-shell {
+  background:
+    radial-gradient(500px 260px at 0% -10%, rgba(34, 211, 238, 0.12), transparent 56%),
+    linear-gradient(180deg, #060b11 0%, #04080d 100%) !important;
+}
+
+.iris-dialog-shell [class*="text-muted-foreground"],
+.iris-dialog-shell p {
+  color: rgba(226, 243, 255, 0.75);
 }

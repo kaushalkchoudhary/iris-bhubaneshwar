@@ -82,12 +82,11 @@ func Connect() error {
 
 	frsDatabaseURL := strings.TrimSpace(os.Getenv("FRS_DATABASE_URL"))
 	if frsDatabaseURL == "" || frsDatabaseURL == databaseURL {
-		FRSDB = DB
-		log.Println("FRS database not separately configured, using primary DB")
-		if err := autoMigrateFRS(DB); err != nil {
-			return fmt.Errorf("failed to auto-migrate FRS tables on primary DB: %w", err)
-		}
-		return nil
+		// FRS_DATABASE_URL must always point to a dedicated FRS DB.
+		// Falling back to the primary DB mixes FRS data with operational data — refuse to start.
+		return fmt.Errorf("FRS_DATABASE_URL is not set or equals DATABASE_URL. " +
+			"Set FRS_DATABASE_URL to the dedicated FRS database (irisfrs on port 5434). " +
+			"FRS data must never be stored in the primary database.")
 	}
 
 	FRSDB, err = gorm.Open(postgres.Open(frsDatabaseURL), &gorm.Config{

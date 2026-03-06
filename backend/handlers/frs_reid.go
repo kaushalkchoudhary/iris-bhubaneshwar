@@ -19,6 +19,7 @@ const (
 	defaultFRSReIDSimilarityThreshold = 0.68
 	defaultFRSUnknownMaxIdleMinutes   = 120
 	defaultFRSReIDCandidateLimit      = 2000
+	defaultFRSDetectionCooldownSeconds = 5
 )
 
 // frsReIDConfig stores runtime knobs for global identity assignment.
@@ -26,6 +27,7 @@ type frsReIDConfig struct {
 	SimilarityThreshold float64
 	UnknownMaxIdle      time.Duration
 	CandidateLimit      int
+	DetectionCooldown   time.Duration
 }
 
 func loadFRSReIDConfig() frsReIDConfig {
@@ -33,6 +35,7 @@ func loadFRSReIDConfig() frsReIDConfig {
 		SimilarityThreshold: defaultFRSReIDSimilarityThreshold,
 		UnknownMaxIdle:      time.Duration(defaultFRSUnknownMaxIdleMinutes) * time.Minute,
 		CandidateLimit:      defaultFRSReIDCandidateLimit,
+		DetectionCooldown:   time.Duration(defaultFRSDetectionCooldownSeconds) * time.Second,
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("FRS_REID_SIMILARITY_THRESHOLD")); raw != "" {
@@ -48,6 +51,11 @@ func loadFRSReIDConfig() frsReIDConfig {
 	if raw := strings.TrimSpace(os.Getenv("FRS_REID_CANDIDATE_LIMIT")); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
 			cfg.CandidateLimit = v
+		}
+	}
+	if raw := strings.TrimSpace(os.Getenv("FRS_DETECTION_COOLDOWN_SECONDS")); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v >= 0 {
+			cfg.DetectionCooldown = time.Duration(v) * time.Second
 		}
 	}
 
@@ -232,10 +240,12 @@ func createGlobalIdentity(tx *gorm.DB, personID *string, embedding []float64, at
 	return &identity, nil
 }
 
-func updateGlobalIdentity(tx *gorm.DB, identity *models.GlobalIdentity, personID *string, embedding []float64, at time.Time, riskLevel *string, matchScore float64) error {
+func updateGlobalIdentity(tx *gorm.DB, identity *models.GlobalIdentity, personID *string, embedding []float64, at time.Time, riskLevel *string, matchScore float64) (time.Time, error) {
 	if identity == nil {
-		return nil
+		return time.Time{}, nil
 	}
+	prevLastSeen := identity.LastSeenTimestamp
+
 	meta, _ := identity.Metadata.Data.(map[string]interface{})
 	if meta == nil {
 		meta = map[string]interface{}{}
@@ -265,40 +275,43 @@ func updateGlobalIdentity(tx *gorm.DB, identity *models.GlobalIdentity, personID
 		updates["risk_level"] = *riskLevel
 	}
 
-	return tx.Model(&models.GlobalIdentity{}).
+	err := tx.Model(&models.GlobalIdentity{}).
 		Where("global_identity_id = ?", identity.GlobalIdentityID).
 		Updates(updates).Error
+	return prevLastSeen, err
 }
 
 // assignGlobalIdentity resolves/creates a stable global identity for each FRS detection.
-func assignGlobalIdentity(tx *gorm.DB, personID *string, embedding []float64, timestamp time.Time) (*models.GlobalIdentity, float64, error) {
+// Returns (identity, matchScore, prevLastSeen, error).
+func assignGlobalIdentity(tx *gorm.DB, personID *string, embedding []float64, timestamp time.Time) (*models.GlobalIdentity, float64, time.Time, error) {
 	if len(embedding) == 0 {
 		if personID == nil || strings.TrimSpace(*personID) == "" {
-			return nil, 0, nil
+			return nil, 0, time.Time{}, nil
 		}
 		var existing models.GlobalIdentity
 		err := tx.Where("associated_person_id = ?", strings.TrimSpace(*personID)).
 			Order("last_seen_timestamp DESC").
 			First(&existing).Error
 		if err == nil {
+			prevSeen := existing.LastSeenTimestamp
 			if upErr := tx.Model(&existing).Update("last_seen_timestamp", timestamp).Error; upErr != nil {
-				return nil, 0, upErr
+				return nil, 0, time.Time{}, upErr
 			}
-			return &existing, 1, nil
+			return &existing, 1, prevSeen, nil
 		}
 		if err != nil && err != gorm.ErrRecordNotFound {
-			return nil, 0, err
+			return nil, 0, time.Time{}, err
 		}
 		riskLevel := riskLevelForPerson(tx, personID)
 		identity, createErr := createGlobalIdentity(tx, personID, nil, timestamp, riskLevel, 0)
-		return identity, 0, createErr
+		return identity, 0, time.Time{}, createErr
 	}
 
 	cfg := loadFRSReIDConfig()
 	since := timestamp.Add(-cfg.UnknownMaxIdle)
 	candidates, err := loadCandidateIdentities(tx, since, cfg)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, time.Time{}, err
 	}
 
 	riskLevel := riskLevelForPerson(tx, personID)
@@ -311,45 +324,49 @@ func assignGlobalIdentity(tx *gorm.DB, personID *string, embedding []float64, ti
 				if score < 0 {
 					score = 1
 				}
-				if err := updateGlobalIdentity(tx, &candidates[i], &cleanPersonID, embedding, timestamp, riskLevel, score); err != nil {
-					return nil, 0, err
+				prevSeen, upErr := updateGlobalIdentity(tx, &candidates[i], &cleanPersonID, embedding, timestamp, riskLevel, score)
+				if upErr != nil {
+					return nil, 0, time.Time{}, upErr
 				}
-				return &candidates[i], score, nil
+				return &candidates[i], score, prevSeen, nil
 			}
 		}
 
 		// Known watchlist identity overrides unknown cluster if similarity passes threshold.
 		unknownBest, unknownScore := pickBestIdentity(candidates, embedding, false)
 		if unknownBest != nil && unknownScore >= cfg.SimilarityThreshold {
-			if err := updateGlobalIdentity(tx, unknownBest, &cleanPersonID, embedding, timestamp, riskLevel, unknownScore); err != nil {
-				return nil, 0, err
+			prevSeen, upErr := updateGlobalIdentity(tx, unknownBest, &cleanPersonID, embedding, timestamp, riskLevel, unknownScore)
+			if upErr != nil {
+				return nil, 0, time.Time{}, upErr
 			}
-			return unknownBest, unknownScore, nil
+			return unknownBest, unknownScore, prevSeen, nil
 		}
 
 		identity, createErr := createGlobalIdentity(tx, &cleanPersonID, embedding, timestamp, riskLevel, 1.0)
-		return identity, 1.0, createErr
+		return identity, 1.0, time.Time{}, createErr
 	}
 
 	// Try known identities first, then unknown clusters.
 	knownBest, knownScore := pickBestIdentity(candidates, embedding, true)
 	if knownBest != nil && knownScore >= cfg.SimilarityThreshold {
-		if err := updateGlobalIdentity(tx, knownBest, knownBest.AssociatedPersonID, embedding, timestamp, knownBest.RiskLevel, knownScore); err != nil {
-			return nil, 0, err
+		prevSeen, upErr := updateGlobalIdentity(tx, knownBest, knownBest.AssociatedPersonID, embedding, timestamp, knownBest.RiskLevel, knownScore)
+		if upErr != nil {
+			return nil, 0, time.Time{}, upErr
 		}
-		return knownBest, knownScore, nil
+		return knownBest, knownScore, prevSeen, nil
 	}
 
 	unknownBest, unknownScore := pickBestIdentity(candidates, embedding, false)
 	if unknownBest != nil && unknownScore >= cfg.SimilarityThreshold {
-		if err := updateGlobalIdentity(tx, unknownBest, nil, embedding, timestamp, nil, unknownScore); err != nil {
-			return nil, 0, err
+		prevSeen, upErr := updateGlobalIdentity(tx, unknownBest, nil, embedding, timestamp, nil, unknownScore)
+		if upErr != nil {
+			return nil, 0, time.Time{}, upErr
 		}
-		return unknownBest, unknownScore, nil
+		return unknownBest, unknownScore, prevSeen, nil
 	}
 
 	identity, createErr := createGlobalIdentity(tx, nil, embedding, timestamp, nil, 0)
-	return identity, 0, createErr
+	return identity, 0, time.Time{}, createErr
 }
 
 func newUUID() string {

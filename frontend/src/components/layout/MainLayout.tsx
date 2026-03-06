@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { ChevronRight, Bell, Sun, Moon } from 'lucide-react';
 import { IRISSidebar } from './sidebar/IRISSidebar';
 import { menuSections, colors } from './sidebar/constants';
@@ -7,9 +7,7 @@ import type { LucideIcon } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { IrisEyeMark } from '@/components/brand/IrisEyeMark';
 
-type MainLayoutProps = {
-  children: React.ReactNode;
-};
+
 
 // Build a flat lookup: path → MenuItem
 const allItems = menuSections.flatMap((s) => s.items);
@@ -19,7 +17,7 @@ const itemByPath = new Map(allItems.map((item) => [item.path, item]));
 const SECTION_DEFAULT: Record<string, string> = {
   vms: '/live-feed',
   traffic: '/itms/anpr',
-  crowd: '/crowd-analytics',
+  crowd: '/frs',
   analytics: '/dashboard',
   system: '/settings',
 };
@@ -113,7 +111,7 @@ const crumbBtnStyle: React.CSSProperties = {
   fontSize: '13px',
   fontWeight: 500,
   transition: 'all 0.15s ease',
-  fontFamily: 'inherit',
+  fontFamily: "var(--font-ui)",
 };
 
 function ContentHeader() {
@@ -138,7 +136,7 @@ function ContentHeader() {
         position: 'sticky',
         top: 0,
         zIndex: 50,
-        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontFamily: "var(--font-display)",
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -275,13 +273,13 @@ function ContentHeader() {
   );
 }
 
-export function MainLayout({ children }: MainLayoutProps) {
+export function MainLayout() {
   const location = useLocation();
   const isHomePage = location.pathname === '/';
   const isLoginPage = location.pathname === '/login';
 
   if (isHomePage || isLoginPage) {
-    return <>{children}</>;
+    return <Outlet />;
   }
 
   return (
@@ -305,7 +303,9 @@ export function MainLayout({ children }: MainLayoutProps) {
         className="app-shell-bg"
       >
         <ContentHeader />
-        <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, scrollbarGutter: 'stable' }}>{children}</div>
+        <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, scrollbarGutter: 'stable' }}>
+          <Outlet />
+        </div>
       </main>
     </div>
   );

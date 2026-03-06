@@ -42,7 +42,7 @@ class LivePreviewWebSocketClient:
         self,
         server_url: str = "http://localhost:3002",
         camera_id: str = None,
-        max_fps: int = 5,
+        max_fps: int = 30,
         jpeg_quality: int = 75,
         frame_resize_height: int = 480,
     ):

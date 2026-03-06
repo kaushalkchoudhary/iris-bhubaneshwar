@@ -201,7 +201,7 @@ function Section({ section, collapsed, isExpanded, onToggle, activeItemPath, onN
                 letterSpacing: '0.1em',
                 fontWeight: 500,
                 color: colors.textMuted,
-                fontFamily: "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace",
+                fontFamily: "var(--font-mono)",
               }}
             >
               {section.label}
@@ -379,7 +379,7 @@ export function IRISSidebar() {
         backgroundColor: colors.bg,
         borderRight: `1px solid ${colors.border}`,
         transition: 'width 0.35s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
-        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontFamily: "var(--font-ui)",
         overflow: 'hidden',
       }}
     >

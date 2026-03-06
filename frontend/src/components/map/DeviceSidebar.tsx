@@ -80,6 +80,10 @@ function VideoPlayer({ src }: { src: string }) {
   const handleInteraction = async (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (isFullscreen) {
+      setIsFullscreen(false);
+      return;
+    }
     const video = videoRef.current;
     if (video && !isPlaying) {
       try {
@@ -108,67 +112,18 @@ function VideoPlayer({ src }: { src: string }) {
     };
   }, []);
 
-  // Track fullscreen state
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const isFs = !!(
-        document.fullscreenElement ||
-        (document as any).webkitFullscreenElement ||
-        (document as any).mozFullScreenElement ||
-        (document as any).msFullscreenElement
-      );
-      setIsFullscreen(isFs);
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
-    };
-  }, []);
-
-  // Toggle fullscreen
-  const toggleFullscreen = async () => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    try {
-      if (!isFullscreen) {
-        if (container.requestFullscreen) {
-          await container.requestFullscreen();
-        } else if ((container as any).webkitRequestFullscreen) {
-          await (container as any).webkitRequestFullscreen();
-        } else if ((container as any).mozRequestFullScreen) {
-          await (container as any).mozRequestFullScreen();
-        } else if ((container as any).msRequestFullscreen) {
-          await (container as any).msRequestFullscreen();
-        }
-      } else {
-        if (document.exitFullscreen) {
-          await document.exitFullscreen();
-        } else if ((document as any).webkitExitFullscreen) {
-          await (document as any).webkitExitFullscreen();
-        } else if ((document as any).mozCancelFullScreen) {
-          await (document as any).mozCancelFullScreen();
-        } else if ((document as any).msExitFullscreen) {
-          await (document as any).msExitFullscreen();
-        }
-      }
-    } catch (err) {
-      console.error('Error toggling fullscreen:', err);
-    }
-  };
+  const toggleFullscreen = () => setIsFullscreen((prev) => !prev);
 
   return (
     <div 
       ref={containerRef}
-      className="relative w-full aspect-video bg-zinc-900 rounded-lg overflow-hidden"
+      className={cn(
+        "relative w-full bg-zinc-900 overflow-hidden",
+        isFullscreen
+          ? "fixed inset-0 z-[90] rounded-none"
+          : "aspect-video rounded-lg"
+      )}
+      onClick={isFullscreen ? () => setIsFullscreen(false) : undefined}
     >
       {hasError && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-red-900/50">
@@ -333,4 +288,3 @@ export function DeviceSidebar({ device, onClose }: DeviceSidebarProps) {
     </div>
   );
 }
-

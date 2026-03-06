@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useRef, type MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Map, Camera, Users, Car, TrendingUp, AlertTriangle,
+  Map, Camera, Users,
   BarChart3, Bell, Settings, Monitor, Shield,
-  FileText, Cog, Server, Compass, ChevronRight, Zap, ArrowRight, UserCircle2, X, LogOut
+  FileText, Cog, Server, ChevronRight, Zap, ArrowRight, UserCircle2, X, LogOut
 } from 'lucide-react';
 import { MapBackground } from './MapBackground';
 import { playSound, playSoundName } from '@/hooks/useSound';
@@ -62,52 +62,54 @@ const mainModules: MainModule[] = [
     },
   },
   {
-    id: 'crowd', icon: Users, label: 'PUBLIC SAFETY', sub: 'Crowd & Face Recognition', side: 'left',
+    id: 'crowd', icon: Users, label: 'PUBLIC SAFETY', sub: 'Face Recognition', side: 'left',
     subItems: [
-      { id: 'crowd-analytics', icon: Users, label: 'Crowd Analytics', desc: 'Density and flow monitoring', path: '/crowd-analytics' },
+      // TEMP DISABLED: Crowd Analytics
+      // { id: 'crowd-analytics', icon: Users, label: 'Crowd Analytics', desc: 'Density and flow monitoring', path: '/crowd-analytics' },
       { id: 'frs', icon: Shield, label: 'Face Recognition', desc: 'Watchlist and unknown faces', path: '/frs' },
     ],
     info: {
-      brief: 'Real-time crowd density estimation and flow analysis using computer vision. Heatmaps, zone alerts, and predictive surge modeling.',
+      brief: 'Face recognition system with watchlist management, real-time detection alerts, and unknown face logging for security and visitor tracking.',
       color: '#FFB700',
-      status: 'Monitoring 8 Zones',
+      status: 'Active Monitoring',
       stats: [
-        { val: '8', label: 'Zones' },
-        { val: '2.4K', label: 'Avg Count' },
-        { val: '< 2s', label: 'Latency' },
+        { val: '6', label: 'Watchlist' },
+        { val: '5', label: 'Detections' },
+        { val: '6', label: 'Devices' },
       ],
-      features: ['Density heatmaps', 'Flow vectors', 'Surge prediction', 'Zone thresholds'],
+      features: ['Watchlist management', 'Real-time alerts', 'Unknown face logging', 'Face embedding search'],
       highlights: [
-        'Real-time density heatmaps overlaid on venue floor plans',
-        'Predictive surge modeling with 15-min advance warnings',
-        'Automated zone capacity alerts with escalation triggers',
+        'Real-time face detection across all connected cameras',
+        'Instant alerts when watchlist persons are detected',
+        'Unknown face capture for manual review and enrollment',
       ],
     },
   },
-  {
-    id: 'itms', icon: Compass, label: 'ITMS', sub: 'Traffic Management', side: 'left',
-    subItems: [
-      { id: 'anpr', icon: Car, label: 'ANPR', desc: 'Plate recognition system', path: '/itms/anpr' },
-      { id: 'vcc', icon: TrendingUp, label: 'VCC', desc: 'Vehicle classification', path: '/itms/vcc' },
-      { id: 'watchlist', icon: AlertTriangle, label: 'Watchlist', desc: 'Monitored vehicles', path: '/itms/watchlist' },
-    ],
-    info: {
-      brief: 'Intelligent traffic management with ANPR, vehicle classification, speed detection, and automated violation processing across corridors.',
-      color: '#00F0FF',
-      status: '12 Junctions Active',
-      stats: [
-        { val: '12', label: 'Junctions' },
-        { val: '98.2%', label: 'ANPR Acc.' },
-        { val: '142', label: 'Violations' },
-      ],
-      features: ['Plate recognition', 'Speed profiling', 'Red-light detection', 'Vehicle counting'],
-      highlights: [
-        'ANPR with 98.2% accuracy across day/night conditions',
-        '14-class vehicle classification with speed profiling',
-        'Automated challan generation for red-light and speed violations',
-      ],
-    },
-  },
+  // TEMP DISABLED: ITMS/Traffic Management
+  // {
+  //   id: 'itms', icon: Compass, label: 'ITMS', sub: 'Traffic Management', side: 'left',
+  //   subItems: [
+  //     { id: 'anpr', icon: Car, label: 'ANPR', desc: 'Plate recognition system', path: '/itms/anpr' },
+  //     { id: 'vcc', icon: TrendingUp, label: 'VCC', desc: 'Vehicle classification', path: '/itms/vcc' },
+  //     { id: 'watchlist', icon: AlertTriangle, label: 'Watchlist', desc: 'Monitored vehicles', path: '/itms/watchlist' },
+  //   ],
+  //   info: {
+  //     brief: 'Intelligent traffic management with ANPR, vehicle classification, speed detection, and automated violation processing across corridors.',
+  //     color: '#00F0FF',
+  //     status: '12 Junctions Active',
+  //     stats: [
+  //       { val: '12', label: 'Junctions' },
+  //       { val: '98.2%', label: 'ANPR Acc.' },
+  //       { val: '142', label: 'Violations' },
+  //     ],
+  //     features: ['Plate recognition', 'Speed profiling', 'Red-light detection', 'Vehicle counting'],
+  //     highlights: [
+  //       'ANPR with 98.2% accuracy across day/night conditions',
+  //       '14-class vehicle classification with speed profiling',
+  //       'Automated challan generation for red-light and speed violations',
+  //     ],
+  //   },
+  // },
   {
     id: 'analytics', icon: BarChart3, label: 'ANALYTICS', sub: 'Data Insights', side: 'right',
     subItems: [
@@ -217,6 +219,8 @@ export function HomePage() {
   const [dismissedAlertIds, setDismissedAlertIds] = useState<Set<string>>(new Set());
   const [onlineCount, setOnlineCount] = useState<number>(15);
   const [perfLite, setPerfLite] = useState(false);
+  const [frsPersons, setFrsPersons] = useState(0);
+  const [frsDetections, setFrsDetections] = useState(0);
   const [liveModuleStats, setLiveModuleStats] = useState<{
     vmsTotal: number;
     vmsOnline: number;
@@ -264,14 +268,14 @@ export function HomePage() {
       if (mod.id === 'crowd') {
         return {
           ...mod,
-          sub: `${liveModuleStats.crowdHotspots} Active Hotspots`,
+          sub: `${frsPersons} Watchlist • ${frsDetections} Detections`,
           info: {
             ...mod.info,
-            status: `${liveModuleStats.crowdCritical} Critical Crowd Zones`,
+            status: `${frsPersons} Persons Watchlisted`,
             stats: [
-              { val: String(liveModuleStats.crowdHotspots), label: 'Hotspots' },
-              { val: String(liveModuleStats.crowdCritical), label: 'Critical' },
-              { val: 'Live', label: 'Monitoring' },
+              { val: String(frsPersons), label: 'Watchlist' },
+              { val: String(frsDetections), label: 'Detections' },
+              { val: String(liveModuleStats.workers), label: 'Devices' },
             ],
           },
         };
@@ -294,14 +298,14 @@ export function HomePage() {
       if (mod.id === 'analytics') {
         return {
           ...mod,
-          sub: `${liveModuleStats.analyticsSources} Data Sources`,
+          sub: `${liveModuleStats.workers} Active Devices`,
           info: {
             ...mod.info,
-            status: `${liveModuleStats.analyticsSources} Data Sources Active`,
+            status: `${liveModuleStats.vmsTotal} Cameras Connected`,
             stats: [
-              { val: String(liveModuleStats.analyticsSources), label: 'Sources' },
-              { val: String(alertTotal), label: 'Alerts' },
-              { val: 'Live', label: 'Sync' },
+              { val: String(liveModuleStats.workers), label: 'Devices' },
+              { val: String(liveModuleStats.vmsTotal), label: 'Cameras' },
+              { val: String(frsPersons), label: 'FRS' },
             ],
           },
         };
@@ -309,14 +313,14 @@ export function HomePage() {
       if (mod.id === 'alerts') {
         return {
           ...mod,
-          sub: alertUnread > 0 ? `${alertUnread} Active` : 'No Active Alerts',
+          sub: alertUnread > 0 ? `${alertUnread} Active` : (frsDetections > 0 ? `${frsDetections} FRS Events` : 'No Active Alerts'),
           info: {
             ...mod.info,
-            status: alertUnread > 0 ? `${alertUnread} Active Alerts` : 'No Active Alerts',
+            status: alertUnread > 0 ? `${alertUnread} Active Alerts` : (frsDetections > 0 ? `${frsDetections} FRS Detections Today` : 'No Active Alerts'),
             stats: [
               { val: String(alertUnread), label: 'Unread' },
-              { val: String(alertToday), label: 'Today' },
               { val: String(alertTotal), label: 'Total' },
+              { val: String(frsDetections), label: 'FRS' },
             ],
           },
         };
@@ -411,12 +415,14 @@ export function HomePage() {
 
     const fetchModuleStats = async () => {
       try {
-        const [camerasRes, hotspotsRes, vehicleStatsRes, vccStatsRes, workersRes] = await Promise.allSettled([
-          apiClient.getDevices({ type: 'CAMERA', minimal: true }),
+        const [camerasRes, hotspotsRes, vehicleStatsRes, vccStatsRes, workersRes, frsPersonsRes, frsDetectionsRes] = await Promise.allSettled([
+          apiClient.getDevices({ type: 'CAMERA' }),
           apiClient.getHotspots(),
           apiClient.getVehicleStats(),
           apiClient.getVCCStats(),
           apiClient.getWorkers(),
+          apiClient.getPersons(),
+          apiClient.getFRSDetections({ limit: 1 }),
         ]);
         const workerPingRes = await apiClient.getWorkersPingStatus().catch(() => null);
         if (!mounted) return;
@@ -441,6 +447,13 @@ export function HomePage() {
         const vehicleStats = vehicleStatsRes.status === 'fulfilled' ? vehicleStatsRes.value : null;
         const vccStats = vccStatsRes.status === 'fulfilled' ? vccStatsRes.value : null;
         const workers = workerTotal;
+
+        const frsPersonsCount = frsPersonsRes.status === 'fulfilled' ? frsPersonsRes.value.length : 0;
+        const frsDetectionsCount = frsDetectionsRes.status === 'fulfilled' 
+          ? (frsDetectionsRes.value as unknown as { total?: number })?.total ?? (frsDetectionsRes.value as unknown as Array<unknown>).length ?? 0 
+          : 0;
+        setFrsPersons(frsPersonsCount);
+        setFrsDetections(frsDetectionsCount);
 
         setLiveModuleStats((prev) => ({
           ...prev,

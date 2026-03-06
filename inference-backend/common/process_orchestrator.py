@@ -8,10 +8,10 @@ Generic Process Orchestrator for Analytics Pipelines
 
 import logging
 import time
-from multiprocessing import Queue, Event, Process
 from datetime import datetime
 from typing import Dict, Callable, Optional, Union, TypedDict, TYPE_CHECKING
 import threading
+from queue import Queue
 import psutil
 import signal
 import os
@@ -42,7 +42,7 @@ class ResourceLimits:
 class CameraWorkerProcess:
     """Manages a single camera worker process with health monitoring"""
     
-    def __init__(self, camera_config: dict, result_queue: Queue, stop_event: Event, 
+    def __init__(self, camera_config: dict, result_queue: Queue, stop_event: threading.Event,
                  worker_function: Callable, pipeline_type: str):
         self.camera_config = camera_config
         self.camera_id = camera_config['camera_id']
@@ -52,11 +52,10 @@ class CameraWorkerProcess:
         self.pipeline_type = pipeline_type
         
         # GPU tracking
-        self.gpu_id = None  # Will be set when worker starts
-        
-        # Process management
-        self.process: Optional[Process] = None
-        self.psutil_process: Optional[psutil.Process] = None
+        self.gpu_id = None
+
+        # Thread management
+        self.process: Optional[threading.Thread] = None
         
         # Resource monitoring
         self.restart_count = 0
@@ -72,106 +71,51 @@ class CameraWorkerProcess:
         self.logger.info(f"Camera worker initialized for {self.camera_id}")
     
     def start(self):
-        """Start the camera worker process"""
+        """Start the camera worker as a thread (shares process with orchestrator)."""
         if self.process and self.process.is_alive():
-            self.logger.warning(f"Camera {self.camera_id} process already running")
+            self.logger.warning(f"Camera {self.camera_id} thread already running")
             return
-        
+
         try:
             self.status = "starting"
-            self.logger.info(f"Starting camera worker process for {self.camera_id}")
-            
-            # Create new process
-            self.process = Process(
+            self.logger.info(f"Starting camera worker thread for {self.camera_id}")
+
+            self.process = threading.Thread(
                 target=self.worker_function,
                 args=(self.camera_config, self.result_queue, self.stop_event),
-                name=f"{self.pipeline_type}-{self.camera_id[:8]}"
+                name=f"{self.pipeline_type}-{self.camera_id[:8]}",
+                daemon=True,
             )
             self.process.start()
-            
-            # Get psutil process for monitoring
-            self.psutil_process = psutil.Process(self.process.pid)
-            
-            # Set CPU affinity to assign 2 cores per camera
-            try:
-                cpu_count = psutil.cpu_count()
-                if cpu_count > 2:
-                    # Assign 2 consecutive cores based on camera index
-                    base_core = (hash(self.camera_id) % (cpu_count // 2)) * 2
-                    assigned_cores = [base_core, base_core + 1]
-                    self.psutil_process.cpu_affinity(assigned_cores)
-                    self.logger.info(f"Camera {self.camera_id} assigned to CPU cores {assigned_cores}")
-                elif cpu_count == 2:
-                    # Use both cores if only 2 available
-                    self.psutil_process.cpu_affinity([0, 1])
-                    self.logger.info(f"Camera {self.camera_id} assigned to CPU cores [0, 1]")
-            except Exception as e:
-                self.logger.warning(f"Could not set CPU affinity for {self.camera_id}: {e}")
-            
-            # Try to determine GPU ID from camera config or process name
-            try:
-                if hasattr(self.camera_config, 'get'):
-                    self.gpu_id = self.camera_config.get('gpu_id')
-                elif 'gpu_id' in self.camera_config:
-                    self.gpu_id = self.camera_config['gpu_id']
-                else:
-                    # Extract from process name if available
-                    process_name = self.process.name
-                    if 'gpu' in process_name.lower():
-                        import re
-                        match = re.search(r'gpu[:\-]?(\d+)', process_name.lower())
-                        if match:
-                            self.gpu_id = int(match.group(1))
-            except Exception as e:
-                self.logger.debug(f"Could not determine GPU ID for {self.camera_id}: {e}")
-            
+
             self.status = "running"
             self.last_health_check = datetime.now()
-            
+
         except Exception as e:
             self.status = "failed"
             self.last_error = str(e)
-            self.logger.error(f"Failed to start camera {self.camera_id}: {e}")
+            self.logger.error(f"Failed to start camera thread {self.camera_id}: {e}")
     
-    def stop(self, timeout: int = 3):
-        """Stop the camera worker process gracefully"""
+    def stop(self, timeout: int = 5):
+        """Signal the camera worker thread to stop and wait for it to finish."""
         try:
             self.status = "stopped"
             if not self.process:
                 return
 
-            self.logger.info(f"Stopping camera worker process for {self.camera_id}")
-
-            # Signal the process to stop
+            self.logger.info(f"Stopping camera worker thread for {self.camera_id}")
             self.stop_event.set()
-
-            # Wait for graceful shutdown (short timeout — dead processes return instantly)
             self.process.join(timeout=timeout)
 
-            # Force terminate if still alive
             if self.process.is_alive():
-                self.logger.warning(f"Force terminating unresponsive worker for {self.camera_id}")
-                self.process.terminate()
-                self.process.join(timeout=2)
+                self.logger.warning(f"Camera thread {self.camera_id} did not stop within {timeout}s — will be reclaimed when daemon exits")
 
-                # Kill if still alive
-                if self.process.is_alive():
-                    self.logger.error(f"Force killing stubborn worker for {self.camera_id}")
-                    self.process.kill()
-                    self.process.join(timeout=1)
-            
             self.process = None
             self.status = "stopped"
-            self.logger.info(f"Camera worker {self.camera_id} stopped successfully")
-            
+            self.logger.info(f"Camera worker {self.camera_id} stopped")
+
         except Exception as e:
             self.logger.error(f"Error stopping camera {self.camera_id}: {e}")
-            # Ensure process is cleaned up even on error
-            if self.process and self.process.is_alive():
-                try:
-                    self.process.kill()
-                except:
-                    pass
             self.process = None
             self.status = "stopped"
     
@@ -202,55 +146,21 @@ class CameraWorkerProcess:
         self.start()
     
     def check_health(self) -> dict:
-        """Check process health and resource usage"""
-        health_status = {
+        """Check thread health."""
+        alive = bool(self.process and self.process.is_alive())
+        self.last_health_check = datetime.now()
+        return {
             'camera_id': self.camera_id,
             'pipeline_type': self.pipeline_type,
-            'status': self.status,
-            'alive': False,
+            'status': self.status if alive else 'stopped',
+            'alive': alive,
             'cpu_percent': 0.0,
             'memory_mb': 0.0,
             'restart_count': self.restart_count,
-            'uptime_seconds': 0,
+            'uptime_seconds': (datetime.now() - self.creation_time).total_seconds(),
             'needs_restart': False,
-            'last_error': self.last_error
+            'last_error': self.last_error,
         }
-        
-        if not self.process or not self.process.is_alive():
-            health_status['status'] = 'stopped'
-            return health_status
-        
-        try:
-            if self.psutil_process and self.psutil_process.is_running():
-                health_status['alive'] = True
-                
-                # Get resource usage
-                cpu_percent = self.psutil_process.cpu_percent()
-                memory_info = self.psutil_process.memory_info()
-                memory_mb = memory_info.rss / (1024 * 1024)  # Convert to MB
-                
-                health_status['cpu_percent'] = cpu_percent
-                health_status['memory_mb'] = memory_mb
-                health_status['uptime_seconds'] = (datetime.now() - self.creation_time).total_seconds()
-                
-                # Check resource limits
-                if cpu_percent > ResourceLimits.MAX_CPU_PERCENT:
-                    self.logger.warning(f"Camera {self.camera_id} exceeding CPU limit: {cpu_percent:.1f}%")
-                    health_status['needs_restart'] = True
-                    health_status['last_error'] = f"CPU usage {cpu_percent:.1f}% > {ResourceLimits.MAX_CPU_PERCENT}%"
-                
-                if memory_mb > ResourceLimits.MAX_MEMORY_MB:
-                    self.logger.warning(f"Camera {self.camera_id} exceeding memory limit: {memory_mb:.1f}MB")
-                    health_status['needs_restart'] = True
-                    health_status['last_error'] = f"Memory usage {memory_mb:.1f}MB > {ResourceLimits.MAX_MEMORY_MB}MB"
-                
-        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-            self.logger.warning(f"Error checking health for camera {self.camera_id}: {e}")
-            health_status['needs_restart'] = True
-            health_status['last_error'] = str(e)
-        
-        self.last_health_check = datetime.now()
-        return health_status
     
     def _can_restart(self) -> bool:
         """Check if process can be restarted based on limits"""
@@ -281,10 +191,10 @@ class GenericPipelineOrchestrator:
         self.worker_function = worker_function
         self.pipeline_type = pipeline_type
 
-        # Process management
+        # Thread management
         self.camera_workers: Dict[str, CameraWorkerProcess] = {}
-        self.result_queue: Queue = Queue() #Queue[ResultQueueItem]
-        self.shutdown_event = Event()
+        self.result_queue: Queue = Queue()
+        self.shutdown_event = threading.Event()
 
         # Monitoring thread
         self.monitor_thread = None
@@ -378,7 +288,7 @@ class GenericPipelineOrchestrator:
                     
                     # Create worker and start
                     worker = CameraWorkerProcess(
-                        source, self.result_queue, Event(), 
+                        source, self.result_queue, threading.Event(),
                         self.worker_function, self.pipeline_type
                     )
                     self.camera_workers[camera_id] = worker
@@ -397,7 +307,7 @@ class GenericPipelineOrchestrator:
                         self.logger.info(f"Configuration changed for camera {camera_id}, restarting")
                         self.camera_workers[camera_id].stop()
                         worker = CameraWorkerProcess(
-                            source, self.result_queue, Event(), 
+                            source, self.result_queue, threading.Event(),
                             self.worker_function, self.pipeline_type
                         )
                         self.camera_workers[camera_id] = worker

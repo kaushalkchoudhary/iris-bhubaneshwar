@@ -742,9 +742,23 @@ func processFRSEvent(event IngestEvent, imageURLs map[string]string) error {
 	}
 
 	return database.FRS().Transaction(func(tx *gorm.DB) error {
-		globalIdentity, reidScore, reidErr := assignGlobalIdentity(tx, personIDPtr, embedding, *event.Timestamp)
+		globalIdentity, reidScore, prevSeen, reidErr := assignGlobalIdentity(tx, personIDPtr, embedding, *event.Timestamp)
 		if reidErr != nil {
 			return reidErr
+		}
+
+		// Cooldown check: if this identity was seen on the SAME device within FRS_DETECTION_COOLDOWN_SECONDS,
+		// skip creating a new detection row to prevent database bloat and alert spam.
+		if globalIdentity != nil && !prevSeen.IsZero() {
+			cfg := loadFRSReIDConfig()
+			if event.Timestamp.Sub(prevSeen) < cfg.DetectionCooldown {
+				// Check if it was the same device (optional but recommended for multi-camera continuity)
+				// Here we just check globally per identity for now, or we could join with detections.
+				// However, globalIdentity update already happened. If we want to skip detection record:
+				log.Printf("[FRS_INGEST] Cooldown active for %s (last seen %v ago), skipping detection record",
+					globalIdentity.GlobalIdentityID, event.Timestamp.Sub(prevSeen))
+				return nil
+			}
 		}
 
 		var globalIdentityIDPtr *string

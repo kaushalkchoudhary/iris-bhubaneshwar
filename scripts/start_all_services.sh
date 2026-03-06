@@ -51,25 +51,6 @@ ensure_databases() {
   echo "      Install Docker Desktop or run PostgreSQL manually." >&2
 }
 
-resolve_db_urls() {
-  if [[ -n "${DATABASE_URL:-}" ]]; then
-    RESOLVED_DATABASE_URL="${DATABASE_URL}"
-  elif is_port_listening 5433; then
-    RESOLVED_DATABASE_URL="postgresql://iris:iris_dev_password@127.0.0.1:5433/irisdrone?sslmode=disable"
-  elif is_port_listening 5432; then
-    RESOLVED_DATABASE_URL="postgresql://127.0.0.1:5432/postgres?sslmode=disable"
-  else
-    RESOLVED_DATABASE_URL=""
-  fi
-
-  if [[ -n "${FRS_DATABASE_URL:-}" ]]; then
-    RESOLVED_FRS_DATABASE_URL="${FRS_DATABASE_URL}"
-  elif is_port_listening 5434; then
-    RESOLVED_FRS_DATABASE_URL="postgresql://iris:iris_dev_password@127.0.0.1:5434/irisfrs?sslmode=disable"
-  else
-    RESOLVED_FRS_DATABASE_URL="${RESOLVED_DATABASE_URL}"
-  fi
-}
 
 # Stop any old processes for these services (best-effort).
 kill_by_pattern() {
@@ -88,9 +69,8 @@ kill_by_pattern "uvicorn anpr_vcc.api_server:app"
 
 sleep 1
 ensure_databases
-resolve_db_urls
 
-if [[ -z "${RESOLVED_DATABASE_URL}" ]]; then
+if [[ -z "${DATABASE_URL:-}" ]]; then
   echo "ERROR: no PostgreSQL detected on 5433 or 5432 and DATABASE_URL is unset." >&2
   echo "Set DATABASE_URL in backend/.env or install/start Docker Desktop, then retry." >&2
   exit 1
@@ -110,9 +90,20 @@ echo "LOCAL_INFERENCE_ENABLED=${LOCAL_INFERENCE_ENABLED}" >> "${PID_FILE}"
 
 (
   cd "${ROOT_DIR}/backend"
+  if [[ -f ".env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source ".env"
+    set +a
+  fi
+
+  # Use resolved URLs if available, otherwise fall back to .env or hardcoded defaults
+  DATABASE_URL="${DATABASE_URL:-postgresql://bhubaneswar_frs_user:GsDZFXCfj9Gb24sztopUwEr8@127.0.0.1:5433/bhubaneswar?sslmode=disable}"
+  FRS_DATABASE_URL="${FRS_DATABASE_URL:-postgresql://iris:iris_dev_password@127.0.0.1:5434/irisfrs?sslmode=disable}"
+
   nohup env \
-    DATABASE_URL="${RESOLVED_DATABASE_URL}" \
-    FRS_DATABASE_URL="${RESOLVED_FRS_DATABASE_URL}" \
+    DATABASE_URL="${DATABASE_URL}" \
+    FRS_DATABASE_URL="${FRS_DATABASE_URL}" \
     GIN_MODE=release \
     GIN_DISABLE_CONSOLE_COLOR=1 \
     GORM_LOG_LEVEL=warn \

@@ -1,7 +1,5 @@
 import {
-  Car, TrendingUp,
-  Eye,
-  Activity, ScanFace, Monitor,
+  ScanFace, Monitor,
   BarChart3, Settings, Shield, Server, FileText, Bell,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -30,20 +28,22 @@ export const menuSections: MenuSection[] = [
       { id: 'live-feed', path: '/live-feed', label: 'Live Feed', icon: Monitor, description: 'Real-time surveillance feed' },
     ],
   },
-  {
-    id: 'traffic',
-    label: 'Traffic Management',
-    items: [
-      { id: 'anpr', path: '/itms/anpr', label: 'ANPR', icon: Car, description: 'License plate recognition' },
-      { id: 'vcc', path: '/itms/vcc', label: 'VCC', icon: TrendingUp, description: 'Vehicle counting' },
-      { id: 'watchlist', path: '/itms/watchlist', label: 'Watchlist', icon: Eye, description: 'Monitored vehicles' },
-    ],
-  },
+  // TEMP DISABLED: Traffic Management
+  // {
+  //   id: 'traffic',
+  //   label: 'Traffic Management',
+  //   items: [
+  //     { id: 'anpr', path: '/itms/anpr', label: 'ANPR', icon: Car, description: 'License plate recognition' },
+  //     { id: 'vcc', path: '/itms/vcc', label: 'VCC', icon: TrendingUp, description: 'Vehicle counting' },
+  //     { id: 'watchlist', path: '/itms/watchlist', label: 'Watchlist', icon: Eye, description: 'Monitored vehicles' },
+  //   ],
+  // },
   {
     id: 'crowd',
     label: 'Public Safety',
     items: [
-      { id: 'crowd-analytics', path: '/crowd-analytics', label: 'Crowd Analytics', icon: Activity, description: 'Crowd density and movement intelligence' },
+      // TEMP DISABLED: Crowd Analytics
+      // { id: 'crowd-analytics', path: '/crowd-analytics', label: 'Crowd Analytics', icon: Activity, description: 'Crowd density and movement intelligence' },
       { id: 'frs', path: '/frs', label: 'FRS (Face Recognition)', icon: ScanFace, description: 'Face recognition watchlist and detections' },
     ],
   },

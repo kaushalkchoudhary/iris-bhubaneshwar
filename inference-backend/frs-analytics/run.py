@@ -10,9 +10,10 @@ import os
 import time
 import threading
 from pathlib import Path
-from multiprocessing import Queue, Event
+from multiprocessing import Queue, Event, Process, Value
+import multiprocessing as _mp
 from datetime import datetime
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Optional
 import numpy as np
 import cv2
 
@@ -69,6 +70,29 @@ for _noisy in ["urllib3", "requests", "onnxruntime", "insightface", "matplotlib"
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 logging.getLogger("onnxruntime").setLevel(logging.ERROR)
 logging.getLogger("insightface").setLevel(logging.ERROR)
+
+
+# ── Shared inference infrastructure ────────────────────────────────────────────
+# One InsightFace model process shared across ALL cameras on this Jetson.
+# Created in main() before any camera processes are forked; inherited by all
+# children via Linux fork semantics (no explicit passing needed).
+
+_MAX_CAMERA_SLOTS = 12   # max cameras this Jetson can run simultaneously
+_shared_inference_input: Optional[Queue] = None       # cameras → inference
+_shared_reply_queues: Optional[List[Queue]] = None    # inference → per-slot camera
+_shared_slot_counter: Optional[Value] = None          # atomic slot assignment
+_shared_inference_proc: Optional[Process] = None
+
+
+def _shared_inference_entry(input_queue, reply_queues: list, config: dict):
+    """Top-level entry point for the shared inference subprocess."""
+    # Re-add paths in subprocess (sys.path not reliably inherited through fork+exec).
+    _frs = Path(__file__).parent
+    for _p in [str(_frs), str(_frs.parent)]:
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+    from inference_worker import shared_inference_worker
+    shared_inference_worker(input_queue, reply_queues, config)
 
 
 # ── Camera worker ──────────────────────────────────────────────────────────────
@@ -151,7 +175,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         # Inference config
         inference_config = {
             'device': device,
-            'det_size': cfg('det_size', [640, 640]),
+            'det_size': cfg('det_size', [960, 960]),
             'det_thresh': cfg('det_thresh', 0.65),
             'use_letterbox': cfg('use_letterbox', True),
             'batch_size': cfg('batch_size', 10),
@@ -165,11 +189,11 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
             'token': camera_config.get('api_token'),
             'confidence_threshold': cfg('confidence_threshold', 0.6),
             'face_area_threshold': cfg('face_area_threshold', 1024),
-            'jpeg_quality': cfg('jpeg_quality', 90),
-            'full_frame_resize_height': cfg('full_frame_resize_height', 1080),
+            'jpeg_quality': cfg('jpeg_quality', 85),
+            'full_frame_resize_height': cfg('full_frame_resize_height', 0),
             'similarity_threshold': cfg('similarity_threshold', 0.65),
-            'duplicate_short_window': cfg('duplicate_short_window', 30.0),
-            'duplicate_long_window': cfg('duplicate_long_window', 300.0),
+            'duplicate_short_window': cfg('duplicate_short_window', 120.0),
+            'duplicate_long_window': cfg('duplicate_long_window', 600.0),
             'max_tracked_faces': cfg('max_tracked_faces', 200),
             'match_threshold': cfg('match_threshold', 0.35),
             'only_watchlist_matches': cfg('only_watchlist_matches', False)
@@ -198,7 +222,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         preview_client = create_live_preview_client(
             camera_id=camera_config['camera_id'],
             server_url=websocket_server_url,
-            max_fps=20,  # Reduced from 30 — biggest CPU sink was JPEG encoding at 30fps
+            max_fps=30,  # Restored to 30 for raw relay
             frame_resize_height=240,
         )
 
@@ -214,15 +238,74 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
             }
         }
 
-        # Start inference thread
-        inference_thread = threading.Thread(
-            target=inference_worker,
-            args=(input_queues, results_queue, inference_config, watchlist_manager),
-            daemon=True,
-            name=f"InferenceWorker-{camera_config['camera_id'][:8]}"
-        )
-        inference_thread.start()
-        logger.info(f"Started inference thread for {camera_config['name']}")
+        # ── Inference: shared process (1 model for all cameras) or per-camera thread ──
+        if _shared_inference_input is not None:
+            # Assign a reply-queue slot atomically (counter shared via fork).
+            with _shared_slot_counter.get_lock():
+                my_slot = _shared_slot_counter.value % _MAX_CAMERA_SLOTS
+                _shared_slot_counter.value += 1
+            my_reply_q = _shared_reply_queues[my_slot]
+
+            # Flush any stale results left by a previous camera that occupied this slot.
+            while True:
+                try:
+                    my_reply_q.get_nowait()
+                except Exception:
+                    break
+
+            logger.info(f"Using shared inference worker (slot {my_slot}) for {camera_config['name']}")
+
+            def inference_relay():
+                """Read frames from local queue, forward to shared inference process."""
+                while not stop_event.is_set():
+                    try:
+                        cam_id, frame = frames_queue.get(timeout=0.5)
+                    except Exception:
+                        continue
+                    # Skip sending to inference when watchlist is empty (save GPU).
+                    if watchlist_manager.is_empty():
+                        try:
+                            results_queue.put_nowait((cam_id, frame, []))
+                        except Exception:
+                            pass
+                        continue
+                    try:
+                        _shared_inference_input.put((cam_id, frame, my_slot), timeout=2.0)
+                    except Exception:
+                        pass  # drop frame if inference process is backed up
+
+            def result_receiver():
+                """Forward results from shared inference reply queue to local results_queue."""
+                while not stop_event.is_set():
+                    try:
+                        item = my_reply_q.get(timeout=1.0)
+                        results_queue.put(item, timeout=0.5)
+                    except Exception:
+                        continue
+
+            inference_thread = threading.Thread(
+                target=inference_relay,
+                daemon=True,
+                name=f"InferenceRelay-{camera_config['camera_id'][:8]}"
+            )
+            inference_thread.start()
+            threading.Thread(
+                target=result_receiver,
+                daemon=True,
+                name=f"ResultReceiver-{camera_config['camera_id'][:8]}"
+            ).start()
+            logger.info(f"Started inference relay + result receiver for {camera_config['name']}")
+
+        else:
+            # Fallback: per-camera inference thread (legacy mode, loads own model).
+            inference_thread = threading.Thread(
+                target=inference_worker,
+                args=(input_queues, results_queue, inference_config, watchlist_manager),
+                daemon=True,
+                name=f"InferenceWorker-{camera_config['camera_id'][:8]}"
+            )
+            inference_thread.start()
+            logger.info(f"Started per-camera inference thread for {camera_config['name']}")
 
         def result_fanout_worker():
             while not stop_event.is_set():
@@ -266,7 +349,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         def raw_stream_sender():
             from queue import Empty as _Empty
             import time as _t
-            frame_interval = 1.0 / 20  # 50 ms per frame (reduced from 30 fps to cut CPU)
+            frame_interval = 1.0 / 30  # 33.3 ms per frame for 30 FPS
             next_send = _t.monotonic()
             try:
                 while not stop_event.is_set():
@@ -347,8 +430,8 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
             raw_output_queues=[raw_frames_queue],
             rtsp_transport=cfg('rtsp_transport', 'tcp'),
             buffer_size=cfg('buffer_size', 10),
-            frame_skip=cfg('skip_frames', 6),
-            resize_width=cfg('resize_width', 960)  # Limit frame width at source to reduce RAM
+            frame_skip=cfg('skip_frames', 10),
+            resize_width=cfg('resize_width', 1280)  # Increased from 960 to 1280 for better crop quality
         )
 
         frame_grabber.start()
@@ -437,6 +520,37 @@ def main():
 
     # Remove --local-only so create_main_function's argparse doesn't choke on it
     sys.argv = [a for a in sys.argv if a != '--local-only']
+
+    # ── Start shared inference worker (ONE model for all cameras) ──────────────
+    # Must be done BEFORE main_func() spawns camera processes so the queues
+    # are inherited by all children via Linux fork.
+    global _shared_inference_input, _shared_reply_queues, _shared_slot_counter, _shared_inference_proc
+
+    _shared_inference_input = _mp.Queue(maxsize=_MAX_CAMERA_SLOTS * 3)
+    _shared_reply_queues = [_mp.Queue(maxsize=4) for _ in range(_MAX_CAMERA_SLOTS)]
+    _shared_slot_counter = _mp.Value('i', 0)
+
+    shared_inference_config = {
+        'device': 'cuda',
+        'det_size': [960, 960],
+        'det_thresh': 0.65,
+        'recognition_thresh': 0.70,  # skip embedding for faces below 70% detection confidence
+        'use_letterbox': True,
+        'batch_size': 10,
+        'batch_timeout': 0.10,
+        'frame_sample_rate': 2,
+        'max_faces_per_frame': 6,
+    }
+    _shared_inference_proc = _mp.Process(
+        target=_shared_inference_entry,
+        args=(_shared_inference_input, _shared_reply_queues, shared_inference_config),
+        daemon=True,
+        name="SharedInferenceWorker",
+    )
+    _shared_inference_proc.start()
+    logging.info(f"Shared inference worker started (PID {_shared_inference_proc.pid}) — "
+                 f"one InsightFace model for all cameras.")
+    # ───────────────────────────────────────────────────────────────────────────
 
     main_func = AnalyticsConfigManager.create_main_function(
         worker_function=camera_worker_function,

@@ -266,3 +266,53 @@ jetsons:
           analytic_config:
             fps: 15
             resolution: 720p
+    - id: wk_d5ffc6fbf2c3589d
+      name: Jetson 23
+      ip: 10.10.0.23
+      mac: fe:ed:0f:71:c6:9e
+      model: Jetson Orin Nano
+      zone_id: zone_pending
+      password: jetson
+      cameras:
+        - camera_id: cam_d25
+          name: D25 - 5TH FLOOR CAM 3
+          rtsp_url: rtsp://admin:nanda%40987@192.168.0.250:554/cam/realmonitor?channel=4&subtype=0
+          zone_id: zone_pending
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d24
+          name: D24 - 5TH FLOOR CAM 2
+          rtsp_url: rtsp://admin:nanda%40987@192.168.0.250:554/cam/realmonitor?channel=6&subtype=0
+          zone_id: zone_pending
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d23
+          name: D23 - 5TH FLOOR CAM 1
+          rtsp_url: rtsp://admin:nanda%40987@192.168.0.250:554/cam/realmonitor?channel=7&subtype=0
+          zone_id: zone_pending
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config:
+            fps: 15
+            resolution: 720p
+        - camera_id: cam_d26
+          name: D26 - 5TH FLOOR CAM 4
+          rtsp_url: rtsp://admin:nanda%40987@192.168.0.250:554/cam/realmonitor?channel=15&subtype=0
+          zone_id: zone_pending
+          lat: 0
+          lng: 0
+          services:
+            - frs
+          analytic_config: {}

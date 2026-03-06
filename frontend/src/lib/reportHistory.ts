@@ -35,7 +35,7 @@ export function saveReportHistory(entries: ReportHistoryEntry[]) {
   }
 }
 
-export function recordReportEvent(input: Omit<ReportHistoryEntry, 'id' | 'generatedAt'> & { generatedAt?: string }) {
+export function recordReportEvent(input: Omit<ReportHistoryEntry, 'id' | 'generatedAt'> & { generatedAt?: string }): ReportHistoryEntry {
   const entry: ReportHistoryEntry = {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     generatedAt: input.generatedAt || new Date().toISOString(),
@@ -43,6 +43,7 @@ export function recordReportEvent(input: Omit<ReportHistoryEntry, 'id' | 'genera
   };
   const current = getReportHistory();
   saveReportHistory([entry, ...current]);
+  return entry;
 }
 
 export function clearReportHistory() {

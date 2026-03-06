@@ -20,6 +20,7 @@ import type {
   WorkerStatus,
   WorkerLiveStat,
 } from '@/lib/worker-types';
+import { TopologyView } from './TopologyView';
 
 // ─── Toggle Switch ────────────────────────────────────────────────────────────
 
@@ -181,8 +182,8 @@ function WorkerLiveCard({ stat, onConfigure, onDelete }: {
 
   return (
     <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl border ${online ? 'border-green-500/15 bg-zinc-900/60' :
-        stat.status === 'pending' ? 'border-yellow-500/20 bg-zinc-900/40' :
-          'border-white/5 bg-zinc-900/40'
+      stat.status === 'pending' ? 'border-yellow-500/20 bg-zinc-900/40' :
+        'border-white/5 bg-zinc-900/40'
       }`}>
       {/* Left: icon + identity */}
       <div className="flex items-center gap-3 min-w-0">
@@ -205,20 +206,36 @@ function WorkerLiveCard({ stat, onConfigure, onDelete }: {
       </div>
 
       {/* Right: stats + actions */}
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex items-center gap-4 shrink-0">
         {/* CPU */}
-        <div className="flex items-center gap-1 text-[11px] text-zinc-400">
-          <Cpu className="w-3 h-3" />
-          <span>{cpuPct != null ? `${cpuPct.toFixed(0)}%` : '—'}</span>
+        <div className="hidden sm:flex flex-col items-center gap-1 min-w-[44px]">
+          <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+            <Cpu className="w-3 h-3" />
+            <span>{cpuPct != null ? `${cpuPct.toFixed(0)}%` : '—'}</span>
+          </div>
+          {cpuPct != null && (
+            <div className="w-10 h-1 rounded-full bg-zinc-800 overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${cpuPct > 85 ? 'bg-red-400' : cpuPct > 60 ? 'bg-amber-400' : 'bg-blue-400'}`}
+                style={{ width: `${Math.min(100, cpuPct)}%` }} />
+            </div>
+          )}
         </div>
         {/* RAM */}
-        <div className="flex items-center gap-1 text-[11px] text-zinc-400">
-          <HardDrive className="w-3 h-3" />
-          <span>{memPct != null ? `${memPct.toFixed(0)}%` : '—'}</span>
+        <div className="hidden sm:flex flex-col items-center gap-1 min-w-[44px]">
+          <div className="flex items-center gap-1 text-[11px] text-zinc-400">
+            <HardDrive className="w-3 h-3" />
+            <span>{memPct != null ? `${memPct.toFixed(0)}%` : '—'}</span>
+          </div>
+          {memPct != null && (
+            <div className="w-10 h-1 rounded-full bg-zinc-800 overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${memPct > 85 ? 'bg-red-400' : memPct > 65 ? 'bg-amber-400' : 'bg-purple-400'}`}
+                style={{ width: `${Math.min(100, memPct)}%` }} />
+            </div>
+          )}
         </div>
         {/* Temp */}
-        <div className={`flex items-center gap-1 text-[11px] ${tempC == null ? 'text-zinc-600' :
-            tempC > 80 ? 'text-red-400' : tempC > 65 ? 'text-amber-400' : tempC > 50 ? 'text-yellow-400' : 'text-sky-400'
+        <div className={`hidden sm:flex items-center gap-1 text-[11px] ${tempC == null ? 'text-zinc-600' :
+          tempC > 80 ? 'text-red-400' : tempC > 65 ? 'text-amber-400' : tempC > 50 ? 'text-yellow-400' : 'text-sky-400'
           }`}>
           <Thermometer className="w-3 h-3" />
           <span>{tempC != null ? `${tempC.toFixed(1)}°C` : '—'}</span>
@@ -494,17 +511,20 @@ export function WorkersDashboard() {
       <div className="h-full overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-5 iris-scroll-area">
 
         {/* Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Server className="w-6 h-6" /> Edge Workers
-            </h1>
-            <p className="text-sm text-zinc-400 mt-0.5">
-              Jetson fleet · camera assignments · RTSP streams
-              {lastChecked && (
-                <span className="text-zinc-600 ml-2">· last polled {timeAgo(lastChecked)}</span>
-              )}
-            </p>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-1">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 w-10 h-10 rounded-xl bg-indigo-500/10 ring-1 ring-indigo-500/20 flex items-center justify-center shrink-0">
+              <Server className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-foreground leading-tight">Edge Workers</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Jetson fleet · camera assignments · RTSP streams
+                {lastChecked && (
+                  <span className="text-muted-foreground/50 ml-2">· polled {timeAgo(lastChecked)}</span>
+                )}
+              </p>
+            </div>
           </div>
           <div className="flex gap-2">
             <Button onClick={() => setAddOpen(true)} variant="default" size="sm">
@@ -520,19 +540,21 @@ export function WorkersDashboard() {
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: 'Total Workers', value: liveStats.length, icon: Server, color: 'text-blue-400' },
-            { label: 'Online', value: online, icon: CheckCircle, color: 'text-emerald-400' },
-            { label: 'Offline', value: offline, icon: XCircle, color: 'text-zinc-500' },
-            { label: 'Cameras', value: totalCams, icon: Camera, color: 'text-purple-400' },
-          ].map(({ label, value, icon: Icon, color }) => (
-            <Card key={label}>
+            { label: 'Total Workers', value: liveStats.length, icon: Server, color: 'text-blue-400', stripe: 'border-t-blue-500/60', iconBg: 'bg-blue-500/10' },
+            { label: 'Online', value: online, icon: CheckCircle, color: 'text-emerald-400', stripe: 'border-t-emerald-500/60', iconBg: 'bg-emerald-500/10' },
+            { label: 'Offline', value: offline, icon: XCircle, color: 'text-zinc-400', stripe: 'border-t-zinc-500/40', iconBg: 'bg-zinc-500/10' },
+            { label: 'Cameras', value: totalCams, icon: Camera, color: 'text-purple-400', stripe: 'border-t-purple-500/60', iconBg: 'bg-purple-500/10' },
+          ].map(({ label, value, icon: Icon, color, stripe, iconBg }) => (
+            <Card key={label} className={`border-t-2 ${stripe} overflow-hidden`}>
               <CardContent className="pt-4 pb-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs text-zinc-500">{label}</p>
-                    <p className={`text-2xl font-bold mt-0.5 ${color}`}>{value}</p>
+                    <p className="text-xs text-muted-foreground font-medium">{label}</p>
+                    <p className={`text-3xl font-bold mt-0.5 ${color}`}>{value}</p>
                   </div>
-                  <Icon className={`w-7 h-7 opacity-25 ${color}`} />
+                  <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center`}>
+                    <Icon className={`w-5 h-5 ${color}`} />
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -575,6 +597,7 @@ export function WorkersDashboard() {
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="workers">Workers ({liveStats.length})</TabsTrigger>
+            <TabsTrigger value="topology">Topology</TabsTrigger>
             <TabsTrigger value="tokens">Registration Tokens</TabsTrigger>
           </TabsList>
 
@@ -606,6 +629,11 @@ export function WorkersDashboard() {
             )}
           </TabsContent>
 
+          {/* Topology tab */}
+          <TabsContent value="topology" className="mt-4 h-[600px] lg:h-[680px]">
+            <TopologyView liveStats={liveStats} />
+          </TabsContent>
+
           {/* Tokens tab */}
           <TabsContent value="tokens" className="mt-4">
             <Card>
@@ -625,12 +653,12 @@ export function WorkersDashboard() {
                 <div className="space-y-2">
                   {tokens.map((token) => (
                     <div key={token.id} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg border ${token.status === 'active' ? 'border-white/10 bg-zinc-900/40' :
-                        token.status === 'used' ? 'border-emerald-500/20 bg-emerald-900/10' :
-                          'border-white/5 bg-zinc-900/20'
+                      token.status === 'used' ? 'border-emerald-500/20 bg-emerald-900/10' :
+                        'border-white/5 bg-zinc-900/20'
                       }`}>
                       <div className="flex items-center gap-3">
                         <Key className={`w-4 h-4 shrink-0 ${token.status === 'active' ? 'text-blue-400' :
-                            token.status === 'used' ? 'text-emerald-400' : 'text-zinc-500'
+                          token.status === 'used' ? 'text-emerald-400' : 'text-zinc-500'
                           }`} />
                         <div>
                           <p className="text-sm font-medium">{token.name}</p>

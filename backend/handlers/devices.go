@@ -54,21 +54,41 @@ func GetDevices(c *gin.Context) {
 	// Minimal mode - return only essential fields
 	if minimal := c.Query("minimal"); minimal == "true" {
 		var minimalDevices []struct {
-			ID           string            `json:"id"`
-			Name         *string           `json:"name"`
-			Type         models.DeviceType `json:"type"`
-			Lat          float64           `json:"lat"`
-			Lng          float64           `json:"lng"`
-			Status       string            `json:"status"`
-			LastSeen     *time.Time        `json:"lastSeen,omitempty"`
-			CameraStatus *string           `json:"cameraStatus,omitempty"`
-			IsOnline     bool              `json:"isOnline,omitempty"`
+			ID           string     `json:"id"`
+			Name         *string    `json:"name"`
+			Type         string     `json:"type"`
+			Lat          float64    `json:"lat"`
+			Lng          float64    `json:"lng"`
+			Status       string     `json:"status"`
+			LastSeen     *time.Time `json:"lastSeen,omitempty"`
+			CameraStatus *string    `json:"cameraStatus,omitempty"`
+			IsOnline     bool       `json:"isOnline,omitempty"`
 		}
 
-		if err := query.Select("id, name, type, lat, lng, status, last_seen, camera_status").
-			Order("id ASC").
-			Find(&minimalDevices).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch devices"})
+		sql := `SELECT id, name, type, lat, lng, status, last_seen, camera_status FROM devices`
+		var whereClauses []string
+		var args []interface{}
+
+		if deviceType := c.Query("type"); deviceType != "" {
+			whereClauses = append(whereClauses, `type = $1`)
+			args = append(args, deviceType)
+		}
+		if zoneID := c.Query("zone"); zoneID != "" {
+			if len(args) > 0 {
+				whereClauses = append(whereClauses, `zone_id = $2`)
+			} else {
+				whereClauses = append(whereClauses, `zone_id = $1`)
+			}
+			args = append(args, zoneID)
+		}
+
+		if len(whereClauses) > 0 {
+			sql += ` WHERE ` + strings.Join(whereClauses, ` AND `)
+		}
+		sql += ` ORDER BY id ASC`
+
+		if err := database.DB.Raw(sql, args...).Scan(&minimalDevices).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch devices: " + err.Error()})
 			return
 		}
 		now := time.Now().UTC().Add(-onlineThreshold)

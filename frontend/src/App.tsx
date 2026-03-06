@@ -54,116 +54,45 @@ function App() {
                       <Route path="/operator-reset" element={<OperatorResetPage />} />
                       <Route path="/logout" element={<Logout />} />
 
-                      {/* Protected Routes */}
-                      <Route path="/" element={
-                        <ProtectedRoute>
-                          <MainLayout>
-                            <Suspense fallback={<PageLoader />}>
-                              <HomePage />
-                            </Suspense>
-                          </MainLayout>
-                        </ProtectedRoute>
-                      } />
+                      <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
+                        <Route index element={<Suspense fallback={<PageLoader />}><HomePage /></Suspense>} />
+                        <Route path="crowd-analytics" element={<Suspense fallback={<PageLoader />}><CrowdDashboard /></Suspense>} />
+                        <Route path="live-feed" element={<Suspense fallback={<PageLoader />}><CameraView /></Suspense>} />
+                        <Route path="itms/*" element={
+                          <Suspense fallback={<PageLoader />}>
+                            <Routes>
+                              <Route path="/" element={<Navigate to="anpr" replace />} />
+                              <Route path="anpr" element={<ANPRDashboard />} />
+                              <Route path="vcc" element={<VCCDashboard />} />
+                              <Route path="watchlist" element={<WatchlistManagement />} />
+                              <Route path="analytics" element={<AnalyticsReporting />} />
+                            </Routes>
+                          </Suspense>
+                        } />
+                        <Route path="frs/*" element={<Suspense fallback={<PageLoader />}><CrowdFRSPage /></Suspense>} />
+                        <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><AnalyticsPage /></Suspense>} />
+                        <Route path="reports" element={<Suspense fallback={<PageLoader />}><ReportsPage /></Suspense>} />
+                        <Route path="analytics/alerts" element={<Suspense fallback={<PageLoader />}><AlertsPage /></Suspense>} />
+                        <Route path="settings/*" element={
+                          <Suspense fallback={<PageLoader />}>
+                            <Routes>
+                              <Route path="/" element={<SettingsPage />} />
+                              <Route path="workers" element={<WorkersDashboard />} />
+                              <Route path="workers/:id" element={<WorkersDashboard />} />
+                              <Route path="operators" element={<OperatorAccessPage />} />
+                            </Routes>
+                          </Suspense>
+                        } />
+                      </Route>
 
-                      <Route path="/crowd-analytics" element={
-                        <ProtectedRoute>
-                          <MainLayout>
-                            <Suspense fallback={<PageLoader />}>
-                              <CrowdDashboard />
-                            </Suspense>
-                          </MainLayout>
-                        </ProtectedRoute>
-                      } />
+                      {/* Redirects */}
                       <Route path="/map" element={<Navigate to="/crowd-analytics" replace />} />
-
-                      <Route path="/live-feed" element={
-                        <ProtectedRoute>
-                          <MainLayout>
-                            <Suspense fallback={<PageLoader />}>
-                              <CameraView />
-                            </Suspense>
-                          </MainLayout>
-                        </ProtectedRoute>
-                      } />
                       <Route path="/cameras" element={<Navigate to="/live-feed" replace />} />
-
-                      <Route path="/itms/*" element={
-                        <ProtectedRoute>
-                          <MainLayout>
-                            <Suspense fallback={<PageLoader />}>
-                              <Routes>
-                                <Route path="/" element={<Navigate to="/itms/anpr" replace />} />
-                                <Route path="/anpr" element={<ANPRDashboard />} />
-                                <Route path="/vcc" element={<VCCDashboard />} />
-                                <Route path="/watchlist" element={<WatchlistManagement />} />
-                                <Route path="/analytics" element={<AnalyticsReporting />} />
-                                <Route path="/investigation" element={<Navigate to="/itms/analytics" replace />} />
-                                <Route path="/devices" element={<Navigate to="/itms/analytics" replace />} />
-                                <Route path="/watchlist/rules" element={<Navigate to="/itms/watchlist" replace />} />
-                              </Routes>
-                            </Suspense>
-                          </MainLayout>
-                        </ProtectedRoute>
-                      } />
-
-                      <Route path="/frs" element={
-                        <ProtectedRoute>
-                          <MainLayout>
-                            <Suspense fallback={<PageLoader />}>
-                              <CrowdFRSPage />
-                            </Suspense>
-                          </MainLayout>
-                        </ProtectedRoute>
-                      } />
                       <Route path="/public-safety" element={<Navigate to="/frs" replace />} />
                       <Route path="/crowd" element={<Navigate to="/frs" replace />} />
-
-                      <Route path="/dashboard" element={
-                        <ProtectedRoute>
-                          <MainLayout>
-                            <Suspense fallback={<PageLoader />}>
-                              <AnalyticsPage />
-                            </Suspense>
-                          </MainLayout>
-                        </ProtectedRoute>
-                      } />
                       <Route path="/analytics" element={<Navigate to="/dashboard" replace />} />
-                      <Route path="/reports" element={
-                        <ProtectedRoute>
-                          <MainLayout>
-                            <Suspense fallback={<PageLoader />}>
-                              <ReportsPage />
-                            </Suspense>
-                          </MainLayout>
-                        </ProtectedRoute>
-                      } />
-
-                      <Route path="/analytics/alerts" element={
-                        <ProtectedRoute>
-                          <MainLayout>
-                            <Suspense fallback={<PageLoader />}>
-                              <AlertsPage />
-                            </Suspense>
-                          </MainLayout>
-                        </ProtectedRoute>
-                      } />
                       <Route path="/alerts" element={<Navigate to="/analytics/alerts" replace />} />
                       <Route path="/itms/alerts" element={<Navigate to="/analytics/alerts" replace />} />
-
-                      <Route path="/settings/*" element={
-                        <ProtectedRoute>
-                          <MainLayout>
-                            <Suspense fallback={<PageLoader />}>
-                              <Routes>
-                                <Route path="/" element={<SettingsPage />} />
-                                <Route path="/workers" element={<WorkersDashboard />} />
-                                <Route path="/workers/:id" element={<WorkersDashboard />} />
-                                <Route path="/operators" element={<OperatorAccessPage />} />
-                              </Routes>
-                            </Suspense>
-                          </MainLayout>
-                        </ProtectedRoute>
-                      } />
 
                       {/* Catch all */}
                       <Route path="*" element={<Navigate to="/" replace />} />

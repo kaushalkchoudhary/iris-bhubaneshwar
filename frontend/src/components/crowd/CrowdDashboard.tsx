@@ -47,6 +47,7 @@ export function CrowdDashboard() {
   const [loading, setLoading]               = useState(true);
   const [selectedHotspot, setSelectedHotspot] = useState<CrowdAnalysis | null>(null);
   const [selectedAlert, setSelectedAlert]     = useState<CrowdAlert | null>(null);
+  const [zoomedFrame, setZoomedFrame]         = useState<{ name: string; src: string | null } | null>(null);
   const [timeRange, setTimeRange]           = useState<TimeRange>('24H');
   const { autoRefresh } = useCrowdDashboard();
 
@@ -368,6 +369,7 @@ export function CrowdDashboard() {
                       analysis={a}
                       sparkline={deviceSparklines[a.deviceId] ?? []}
                       liveFrame={liveFrames[a.deviceId] ?? null}
+                      onZoom={() => setZoomedFrame({ name: a.device?.name || a.deviceId, src: liveFrames[a.deviceId] ?? null })}
                       onClick={() => setSelectedHotspot(a)}
                     />
                   ))}
@@ -450,6 +452,26 @@ export function CrowdDashboard() {
     {/* ── Alert Detail Modal ────────────────────────────────────────────────── */}
     {selectedAlert && (
       <AlertModal alert={selectedAlert} onClose={() => setSelectedAlert(null)} />
+    )}
+
+    {zoomedFrame && (
+      <div
+        className="fixed inset-0 z-[80] bg-black/90 backdrop-blur-sm p-3 md:p-6"
+        onClick={() => setZoomedFrame(null)}
+      >
+        <div className="relative w-full h-full rounded-xl overflow-hidden border border-white/10 bg-black">
+          <div className="absolute top-3 left-3 z-10 pointer-events-none bg-black/70 text-white text-xs px-2 py-1 rounded">
+            {zoomedFrame.name}
+          </div>
+          {zoomedFrame.src ? (
+            <img src={zoomedFrame.src} alt={zoomedFrame.name} className="w-full h-full object-contain" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-zinc-500">
+              <Users className="w-12 h-12 opacity-40" />
+            </div>
+          )}
+        </div>
+      </div>
     )}
     </>
   );
@@ -682,8 +704,8 @@ function SummaryRow({ label, value, valueColor, icon }: {
 
 // ─── Hotspot Card ─────────────────────────────────────────────────────────────
 
-function HotspotCard({ analysis, sparkline, liveFrame, onClick }: {
-  analysis: CrowdAnalysis; sparkline: number[]; liveFrame: string | null; onClick: () => void;
+function HotspotCard({ analysis, sparkline, liveFrame, onClick, onZoom }: {
+  analysis: CrowdAnalysis; sparkline: number[]; liveFrame: string | null; onClick: () => void; onZoom: () => void;
 }) {
   const currentCount  = analysis.peopleCount ?? 0;
   const dailyTotal    = analysis.cumulativeCount ?? null;
@@ -731,9 +753,17 @@ function HotspotCard({ analysis, sparkline, liveFrame, onClick }: {
         </div>
 
         {/* Expand icon */}
-        <div className="absolute top-2 right-2 w-5 h-5 rounded bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onZoom();
+          }}
+          className="absolute top-2 right-2 w-5 h-5 rounded bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/70"
+          title="Zoom feed"
+        >
           <Maximize2 className="w-3 h-3 text-white" />
-        </div>
+        </button>
 
         {/* Overlay gradient */}
         <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-black/80 to-transparent" />

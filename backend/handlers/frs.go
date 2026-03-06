@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -424,14 +425,17 @@ func AddFRSPersonEmbeddings(c *gin.Context) {
 func GetFRSDetections(c *gin.Context) {
 	limit := 50
 	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 500 {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 10000 {
 			limit = parsed
 		}
 	}
 
 	query := database.FRS().Model(&models.FRSDetection{}).
 		Preload("Person").
-		Preload("GlobalIdentity").
+		Preload("GlobalIdentity", func(db *gorm.DB) *gorm.DB {
+			// Exclude the 512-dim embedding centroid — it can be 10MB+ for large result sets
+			return db.Select("global_identity_id, first_seen_timestamp, last_seen_timestamp, associated_person_id, risk_level")
+		}).
 		Order("timestamp DESC").
 		Limit(limit)
 
@@ -495,6 +499,167 @@ func GetFRSDetections(c *gin.Context) {
 	c.JSON(http.StatusOK, detections)
 }
 
+// GetFRSTimeline returns per-day or per-hour detection counts (known + unknown) for the timeline chart.
+// GET /api/frs/timeline?granularity=day|hour&startTime=...&endTime=...
+func GetFRSTimeline(c *gin.Context) {
+	granularity := strings.ToLower(strings.TrimSpace(c.Query("granularity")))
+	if granularity != "hour" {
+		granularity = "day"
+	}
+
+	var whereClauses []string
+	var whereArgs []interface{}
+	if s := strings.TrimSpace(c.Query("startTime")); s != "" {
+		if p, err := time.Parse(time.RFC3339, s); err == nil {
+			whereClauses = append(whereClauses, "timestamp >= ?")
+			whereArgs = append(whereArgs, p)
+		}
+	}
+	if e := strings.TrimSpace(c.Query("endTime")); e != "" {
+		if p, err := time.Parse(time.RFC3339, e); err == nil {
+			whereClauses = append(whereClauses, "timestamp <= ?")
+			whereArgs = append(whereArgs, p)
+		}
+	}
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	trunc := "day"
+	if granularity == "hour" {
+		trunc = "hour"
+	}
+
+	type TimelineBucket struct {
+		Period  time.Time `json:"period"`
+		Total   int64     `json:"total"`
+		Known   int64     `json:"known"`
+		Unknown int64     `json:"unknown"`
+	}
+	var buckets []TimelineBucket
+	database.FRS().Raw(fmt.Sprintf(`
+		SELECT
+			DATE_TRUNC('%s', timestamp) AS period,
+			COUNT(*) AS total,
+			COUNT(CASE WHEN person_id IS NOT NULL AND person_id <> '' THEN 1 END) AS known,
+			COUNT(CASE WHEN person_id IS NULL OR person_id = '' THEN 1 END) AS unknown
+		FROM frs_detections
+		%s
+		GROUP BY DATE_TRUNC('%s', timestamp)
+		ORDER BY period ASC
+	`, trunc, whereSQL, trunc), whereArgs...).Scan(&buckets)
+
+	if buckets == nil {
+		buckets = []TimelineBucket{}
+	}
+	c.JSON(http.StatusOK, buckets)
+}
+
+// GetFRSStats returns aggregated FRS analytics (counts, by-device, by-person)
+// without any per-row limit, so the analytics dashboard always shows accurate totals.
+func GetFRSStats(c *gin.Context) {
+	var whereClauses []string
+	var whereArgs []interface{}
+	if s := strings.TrimSpace(c.Query("startTime")); s != "" {
+		if p, err := time.Parse(time.RFC3339, s); err == nil {
+			whereClauses = append(whereClauses, "timestamp >= ?")
+			whereArgs = append(whereArgs, p)
+		}
+	}
+	if e := strings.TrimSpace(c.Query("endTime")); e != "" {
+		if p, err := time.Parse(time.RFC3339, e); err == nil {
+			whereClauses = append(whereClauses, "timestamp <= ?")
+			whereArgs = append(whereArgs, p)
+		}
+	}
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	db := database.FRS()
+
+	type overviewRow struct {
+		Total   int64
+		Known   int64
+		AvgConf float64
+	}
+	var ov overviewRow
+	db.Raw(fmt.Sprintf(`
+		SELECT
+			COUNT(*) AS total,
+			COUNT(CASE WHEN person_id IS NOT NULL AND person_id <> '' THEN 1 END) AS known,
+			COALESCE(AVG(confidence), 0) AS avg_conf
+		FROM frs_detections %s
+	`, whereSQL), whereArgs...).Scan(&ov)
+
+	type DeviceStat struct {
+		DeviceID   string `json:"deviceId"`
+		DeviceName string `json:"deviceName"`
+		Count      int64  `json:"count"`
+	}
+	var deviceStats []DeviceStat
+	db.Raw(fmt.Sprintf(`
+		SELECT
+			fd.device_id,
+			COALESCE(d.name, fd.device_id) AS device_name,
+			COUNT(*) AS count
+		FROM frs_detections fd
+		LEFT JOIN devices d ON d.id = fd.device_id
+		%s
+		GROUP BY fd.device_id, d.name
+		ORDER BY count DESC
+	`, whereSQL), whereArgs...).Scan(&deviceStats)
+
+	type PersonStat struct {
+		PersonID     string    `json:"personId"`
+		PersonName   string    `json:"personName"`
+		FaceImageURL string    `json:"faceImageUrl"`
+		Count        int64     `json:"count"`
+		LastSeen     time.Time `json:"lastSeen"`
+		AvgConf      float64   `json:"avgConfidence"`
+	}
+	var personStats []PersonStat
+	personWhereSQL := whereSQL
+	if personWhereSQL == "" {
+		personWhereSQL = "WHERE fd.person_id IS NOT NULL AND fd.person_id <> ''"
+	} else {
+		personWhereSQL += " AND fd.person_id IS NOT NULL AND fd.person_id <> ''"
+	}
+	db.Raw(fmt.Sprintf(`
+		SELECT
+			fd.person_id,
+			fp.name AS person_name,
+			COALESCE(fp.face_image_url, '') AS face_image_url,
+			COUNT(*) AS count,
+			MAX(fd.timestamp) AS last_seen,
+			AVG(fd.confidence) AS avg_conf
+		FROM frs_detections fd
+		JOIN frs_persons fp ON fp.id = fd.person_id
+		%s
+		GROUP BY fd.person_id, fp.name, fp.face_image_url
+		ORDER BY count DESC
+		LIMIT 20
+	`, personWhereSQL), whereArgs...).Scan(&personStats)
+
+	if deviceStats == nil {
+		deviceStats = []DeviceStat{}
+	}
+	if personStats == nil {
+		personStats = []PersonStat{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"totalDetections":   ov.Total,
+		"knownDetections":   ov.Known,
+		"unknownDetections": ov.Total - ov.Known,
+		"avgConfidence":     ov.AvgConf,
+		"byDevice":          deviceStats,
+		"byPerson":          personStats,
+	})
+}
+
 // GetFRSGlobalIdentities lists ReID global identities with optional filters.
 func GetFRSGlobalIdentities(c *gin.Context) {
 	limit := 100
@@ -534,6 +699,91 @@ func GetFRSGlobalIdentities(c *gin.Context) {
 }
 
 // GetFRSGlobalIdentityDetections returns timeline detections for one global identity.
+// GenerateFRSReport generates a PDF report by calling the Python report script.
+// GET /api/frs/report?title=...&filter=...&startTime=...&endTime=...&timeRange=...
+func GenerateFRSReport(c *gin.Context) {
+	title := strings.TrimSpace(c.Query("title"))
+	if title == "" {
+		title = "FRS Analytics Report"
+	}
+	filter := strings.TrimSpace(c.Query("filter"))
+	if filter == "" {
+		filter = "all"
+	}
+	startTime := strings.TrimSpace(c.Query("startTime"))
+	endTime := strings.TrimSpace(c.Query("endTime"))
+	timeRange := strings.TrimSpace(c.Query("timeRange"))
+	if timeRange == "" {
+		timeRange = "All Time"
+	}
+
+	// Find the Python script — try project root first, then one level up (when CWD is backend/).
+	scriptPath := ""
+	for _, candidate := range []string{"scripts/generate_frs_report.py", "../scripts/generate_frs_report.py"} {
+		if _, err := os.Stat(candidate); err == nil {
+			scriptPath = candidate
+			break
+		}
+	}
+	if scriptPath == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Report script not found"})
+		return
+	}
+
+	// Write output to a temp file.
+	tmpFile, err := os.CreateTemp("", "frs_report_*.pdf")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp file"})
+		return
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	args := []string{scriptPath, "--output", tmpPath, "--title", title,
+		"--filter", filter, "--time-range", timeRange}
+	if startTime != "" {
+		args = append(args, "--start-time", startTime)
+	}
+	if endTime != "" {
+		args = append(args, "--end-time", endTime)
+	}
+
+	frsDBURL := os.Getenv("FRS_DATABASE_URL")
+	cmd := exec.Command("python3", args...)
+	cmd.Env = append(os.Environ(),
+		"FRS_DATABASE_URL="+frsDBURL,
+		"UPLOAD_DIR="+func() string {
+			if d := os.Getenv("UPLOAD_DIR"); d != "" {
+				return d
+			}
+			home, _ := os.UserHomeDir()
+			return filepath.Join(home, "itms", "data")
+		}(),
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	log.Printf("[FRS Report] Generating: title=%q filter=%q start=%s end=%s", title, filter, startTime, endTime)
+	if err := cmd.Run(); err != nil {
+		log.Printf("[FRS Report] Script failed: %v — stderr: %s", err, stderr.String())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Report generation failed", "detail": stderr.String()})
+		return
+	}
+
+	pdfBytes, err := os.ReadFile(tmpPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read generated PDF"})
+		return
+	}
+
+	filename := fmt.Sprintf("frs_report_%d.pdf", time.Now().Unix())
+	c.Header("Content-Disposition", "attachment; filename="+filename)
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Length", strconv.Itoa(len(pdfBytes)))
+	c.Data(http.StatusOK, "application/pdf", pdfBytes)
+}
+
 func GetFRSGlobalIdentityDetections(c *gin.Context) {
 	globalIdentityID := strings.TrimSpace(c.Param("id"))
 	if globalIdentityID == "" {

@@ -13,6 +13,8 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+const streamStopGracePeriod = 8 * time.Second
+
 // FeedHub manages camera feed subscriptions and WebSocket connections
 type FeedHub struct {
 	natsConn *nats.Conn
@@ -35,8 +37,15 @@ type FeedHub struct {
 	stopFPS  chan struct{}
 
 	// Active publishers: sync.Map[cameraKey -> time.Time]
-	// sync.Map avoids exclusive mutex at 500 frames/sec.
 	activePubs sync.Map
+
+	// lastBroadcasts tracks the last time a detection was broadcast for a person/globalIdentity
+	// key: cameraKey + ":" + identityID
+	lastBroadcasts sync.Map
+
+	// Delayed stop timers to avoid stream churn on short-lived browser reconnects.
+	stopTimers   map[string]*time.Timer
+	stopTimersMu sync.Mutex
 }
 
 // cameraSubscription tracks a camera feed subscription
@@ -77,9 +86,63 @@ func NewFeedHub(natsConn *nats.Conn) *FeedHub {
 		register:   make(chan *FeedClient, 64),
 		unregister: make(chan *FeedClient, 64),
 		stopFPS:    make(chan struct{}),
+		stopTimers: make(map[string]*time.Timer),
 	}
 	go h.logFPS()
 	return h
+}
+
+func (h *FeedHub) cancelPendingStop(cameraKey string) {
+	h.stopTimersMu.Lock()
+	if t, ok := h.stopTimers[cameraKey]; ok {
+		t.Stop()
+		delete(h.stopTimers, cameraKey)
+	}
+	h.stopTimersMu.Unlock()
+}
+
+func (h *FeedHub) scheduleStopIfIdle(cameraKey string) {
+	h.stopTimersMu.Lock()
+	if existing, ok := h.stopTimers[cameraKey]; ok {
+		existing.Stop()
+	}
+	h.stopTimers[cameraKey] = time.AfterFunc(streamStopGracePeriod, func() {
+		h.subscriptionsMu.Lock()
+		sub, exists := h.subscriptions[cameraKey]
+		if !exists {
+			h.subscriptionsMu.Unlock()
+			h.stopTimersMu.Lock()
+			delete(h.stopTimers, cameraKey)
+			h.stopTimersMu.Unlock()
+			return
+		}
+
+		sub.viewersMu.RLock()
+		viewerCount := len(sub.viewers)
+		sub.viewersMu.RUnlock()
+		if viewerCount > 0 {
+			h.subscriptionsMu.Unlock()
+			h.stopTimersMu.Lock()
+			delete(h.stopTimers, cameraKey)
+			h.stopTimersMu.Unlock()
+			return
+		}
+
+		if sub.detectSub != nil {
+			sub.detectSub.Unsubscribe()
+		}
+		delete(h.subscriptions, cameraKey)
+		h.subscriptionsMu.Unlock()
+
+		workerID, cameraID, _ := parseCameraKey(cameraKey)
+		h.sendStopStreamCommand(workerID, cameraID)
+		log.Printf("Removed subscription for camera %s after %s idle grace (no viewers)", cameraKey, streamStopGracePeriod)
+
+		h.stopTimersMu.Lock()
+		delete(h.stopTimers, cameraKey)
+		h.stopTimersMu.Unlock()
+	})
+	h.stopTimersMu.Unlock()
 }
 
 // logFPS logs FPS every second for frames broadcast to WebSocket clients
@@ -159,6 +222,7 @@ func (h *FeedHub) Subscribe(client *FeedClient, cameraKey string) error {
 
 	h.subscriptionsMu.Lock()
 	defer h.subscriptionsMu.Unlock()
+	h.cancelPendingStop(cameraKey)
 
 	sub, exists := h.subscriptions[cameraKey]
 	if !exists {
@@ -221,15 +285,7 @@ func (h *FeedHub) unsubscribeClient(client *FeedClient, cameraKey string) {
 	client.camerasMu.Unlock()
 
 	if viewerCount == 0 {
-		if sub.detectSub != nil {
-			sub.detectSub.Unsubscribe()
-		}
-		delete(h.subscriptions, cameraKey)
-
-		workerID, cameraID, _ := parseCameraKey(cameraKey)
-		h.sendStopStreamCommand(workerID, cameraID)
-
-		log.Printf("Removed subscription for camera %s (no viewers)", cameraKey)
+		h.scheduleStopIfIdle(cameraKey)
 	}
 
 	log.Printf("Client %s unsubscribed from %s", client.remoteAddr, cameraKey)
@@ -348,6 +404,33 @@ func (h *FeedHub) PublishDetection(cameraKey string, detectionJSON []byte) {
 	if err != nil {
 		return
 	}
+
+	// Debounce check: skip broadcasting if similar detection seen on this camera recently
+	var det struct {
+		PersonID         *string `json:"person_id"`
+		GlobalIdentityID *string `json:"global_identity_id"`
+	}
+	if err := json.Unmarshal(detectionJSON, &det); err == nil {
+		id := ""
+		if det.PersonID != nil && *det.PersonID != "" {
+			id = *det.PersonID
+		} else if det.GlobalIdentityID != nil && *det.GlobalIdentityID != "" {
+			id = *det.GlobalIdentityID
+		}
+
+		if id != "" {
+			debounceKey := cameraKey + ":" + id
+			now := time.Now()
+			if last, ok := h.lastBroadcasts.Load(debounceKey); ok {
+				if now.Sub(last.(time.Time)) < 5*time.Second {
+					// Suppress redundant real-time broadcast
+					return
+				}
+			}
+			h.lastBroadcasts.Store(debounceKey, now)
+		}
+	}
+
 	subject := fmt.Sprintf("detections.%s.%s", workerID, cameraID)
 	if err := h.natsConn.Publish(subject, detectionJSON); err != nil {
 		log.Printf("⚠️ PublishDetection NATS error for %s: %v", cameraKey, err)

@@ -29,7 +29,7 @@ def sanitize_log_text(value: str) -> str:
 
 
 def build_logger(logs_dir: Path, log_file: Optional[Path] = None) -> logging.Logger:
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    """Build logger. Stdout-only by default; pass log_file to also write to disk."""
     logger = logging.getLogger("frs-launcher")
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
@@ -40,11 +40,11 @@ def build_logger(logs_dir: Path, log_file: Optional[Path] = None) -> logging.Log
     ch.setFormatter(fmt)
     logger.addHandler(ch)
 
-    target_log = log_file or (logs_dir / "frs-launcher.log")
-    target_log.parent.mkdir(parents=True, exist_ok=True)
-    fh = logging.FileHandler(target_log)
-    fh.setFormatter(fmt)
-    logger.addHandler(fh)
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        fh = logging.FileHandler(log_file)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
     return logger
 
 
@@ -95,8 +95,12 @@ def main() -> int:
     logs_dir = (root / args.logs_dir).resolve()
     env_single_log = str(os.getenv("INFERENCE_SINGLE_LOG", "")).lower() in ("1", "true", "yes", "on")
     single_log = bool(args.single_log or env_single_log)
+    # Default: stdout/journald only — no log files on disk.
+    # Set EDGE_LOG_TO_FILE=1 to write logs to disk (dev/debug only).
+    log_to_file = str(os.getenv("EDGE_LOG_TO_FILE", "")).lower() in ("1", "true", "yes", "on")
     combined_log = Path(args.combined_log_file).resolve() if args.combined_log_file else (logs_dir / "frs.log")
-    logger = build_logger(logs_dir, combined_log if single_log else None)
+    file_log = (combined_log if single_log else logs_dir / "frs-launcher.log") if log_to_file else None
+    logger = build_logger(logs_dir, file_log)
 
     base_env = dict(os.environ)
     base_env["PYTHONUNBUFFERED"] = "1"
@@ -117,7 +121,7 @@ def main() -> int:
         logger.error("frs-analytics directory not found at %s", frs_dir)
         return 1
 
-    write_service_log = not single_log
+    write_service_log = log_to_file and not single_log
 
     stop_event = threading.Event()
     restart_count = 0
@@ -132,9 +136,11 @@ def main() -> int:
     # ── Embedding server (GPU) ─────────────────────────────────────────────────
     # Start embedding_server.py so the central Mac can offload face embedding
     # computation to this Jetson's GPU.  Runs on EMBEDDING_SERVER_PORT (default 5555).
+    # Set EDGE_EMBED_SERVER=0 to skip on Jetsons that don't need to serve enrollments.
+    _embed_enabled = str(os.getenv("EDGE_EMBED_SERVER", "1")).lower() not in ("0", "false", "no", "off")
     embed_server_script = frs_dir / "embedding_server.py"
     embed_proc: Optional[subprocess.Popen] = None
-    if embed_server_script.exists():
+    if _embed_enabled and embed_server_script.exists():
         embed_cmd = [args.python_bin, str(embed_server_script)]
         embed_env = dict(base_env)
         embed_env.setdefault("EMBEDDING_SERVER_PORT", "5555")

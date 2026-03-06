@@ -500,6 +500,9 @@ func main() {
 			frs.DELETE("/persons/:id", handlers.DeleteFRSPerson)
 			frs.POST("/persons/:id/embeddings", handlers.AddFRSPersonEmbeddings)
 			frs.GET("/detections", handlers.GetFRSDetections)
+			frs.GET("/timeline", handlers.GetFRSTimeline)
+			frs.GET("/stats", handlers.GetFRSStats)
+			frs.GET("/report", handlers.GenerateFRSReport)
 			frs.GET("/global-identities", handlers.GetFRSGlobalIdentities)
 			frs.GET("/global-identities/:id/detections", handlers.GetFRSGlobalIdentityDetections)
 		}

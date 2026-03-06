@@ -100,3 +100,13 @@ reports/
 magicwatchdog/magicwatchdog-arm64
 iris.webp
 typescript
+
+# Runtime backend binary (compiled, not source)
+runtime-backend/iris-backend
+
+# Agent skill packs (development tooling, not product code)
+.agents/skills/
+
+# IDE / tool context metadata
+.context/
+
