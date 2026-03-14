@@ -87,6 +87,14 @@ function timeAgo(iso: string): string {
   return fmt(Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
 }
 
+const HEARTBEAT_ONLINE_WINDOW_SEC = 45;
+
+function isWorkerOnline(stat: WorkerLiveStat): boolean {
+  if (stat.status === 'revoked' || stat.status === 'pending') return false;
+  // Treat as online only when host is reachable AND heartbeat is fresh.
+  return Boolean(stat.reachable) && Number(stat.lastSeenAgo ?? 999999) <= HEARTBEAT_ONLINE_WINDOW_SEC;
+}
+
 // ─── Camera Config Row ────────────────────────────────────────────────────────
 
 type CamCfg = { enabled: boolean; fps: number; resolution: string; analytics: string[]; rtspUrl: string };
@@ -174,11 +182,11 @@ function WorkerLiveCard({ stat, onConfigure, onDelete }: {
   onConfigure: () => void;
   onDelete: () => void;
 }) {
-  const online = stat.reachable && stat.status !== 'revoked' && stat.status !== 'pending';
+  const online = isWorkerOnline(stat);
   const r = stat.resources;
-  const cpuPct = r?.cpu_percent ?? (r?.cpu_load_1m != null ? Math.min(100, (r.cpu_load_1m / 6) * 100) : null);
-  const memPct = r?.memory_percent ?? null;
-  const tempC = r?.temperature_c ?? null;
+  const cpuPct = online ? (r?.cpu_percent ?? (r?.cpu_load_1m != null ? Math.min(100, (r.cpu_load_1m / 6) * 100) : null)) : null;
+  const memPct = online ? (r?.memory_percent ?? null) : null;
+  const tempC = online ? (r?.temperature_c ?? null) : null;
 
   return (
     <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl border ${online ? 'border-green-500/15 bg-zinc-900/60' :
@@ -499,7 +507,7 @@ export function WorkersDashboard() {
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 
-  const online = liveStats.filter((s) => s.reachable).length;
+  const online = liveStats.filter((s) => isWorkerOnline(s)).length;
   const offline = liveStats.length - online;
   const totalCams = liveStats.reduce((s, w) => s + w.cameraCount, 0);
   const enabledCount = Object.values(cameraConfigMap).filter((c) => c.enabled).length;

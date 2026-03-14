@@ -61,13 +61,8 @@ func GetAlerts(c *gin.Context) {
 	// Get total count
 	query.Model(&models.WatchlistAlert{}).Count(&total)
 
-	// Fetch alerts with relations
+	// WatchlistAlert model has no GORM relation fields; fetch plain rows.
 	if err := query.
-		Preload("Watchlist").
-		Preload("Watchlist.Vehicle").
-		Preload("Vehicle").
-		Preload("Detection").
-		Preload("Device").
 		Order("timestamp DESC").
 		Limit(limit).
 		Offset(offset).
@@ -137,11 +132,11 @@ func DismissAlert(c *gin.Context) {
 // GetAlertStats handles GET /api/alerts/stats - Get alert statistics
 func GetAlertStats(c *gin.Context) {
 	var stats struct {
-		Total      int64 `json:"total"`
-		Unread     int64 `json:"unread"`
-		Read       int64 `json:"read"`
-		Today      int64 `json:"today"`
-		ByType     map[string]int64 `json:"byType"`
+		Total  int64            `json:"total"`
+		Unread int64            `json:"unread"`
+		Read   int64            `json:"read"`
+		Today  int64            `json:"today"`
+		ByType map[string]int64 `json:"byType"`
 	}
 
 	stats.ByType = make(map[string]int64)
@@ -175,4 +170,3 @@ func GetAlertStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, stats)
 }
-

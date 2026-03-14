@@ -6,6 +6,7 @@ import { Loader2, FileText, Download, Calendar } from 'lucide-react';
 import { recordReportEvent } from '@/lib/reportHistory';
 import { saveReportBlob } from '@/lib/reportStorage';
 import { cn } from '@/lib/utils';
+import { apiClient } from '@/lib/api';
 import type { Person, FRSMatch } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -36,17 +37,7 @@ export function FRSReportModal({ open, onOpenChange, persons: _persons, detectio
                 : timeRange;
             params.set('timeRange', humanRange);
 
-            const token = localStorage.getItem('iris_token');
-            const res = await fetch(`/api/frs/report?${params}`, {
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-            });
-
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Report generation failed');
-            }
-
-            const blob = await res.blob();
+            const blob = await apiClient.generateFRSReport(params);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;

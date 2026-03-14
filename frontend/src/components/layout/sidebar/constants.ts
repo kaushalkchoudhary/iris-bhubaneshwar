@@ -44,7 +44,8 @@ export const menuSections: MenuSection[] = [
     items: [
       // TEMP DISABLED: Crowd Analytics
       // { id: 'crowd-analytics', path: '/crowd-analytics', label: 'Crowd Analytics', icon: Activity, description: 'Crowd density and movement intelligence' },
-      { id: 'frs', path: '/frs', label: 'FRS (Face Recognition)', icon: ScanFace, description: 'Face recognition watchlist and detections' },
+      { id: 'frs', path: '/frs/live', label: 'Face Recognition', icon: ScanFace, description: 'Watchlist and detections' },
+      { id: 'gods-eye', path: '/public-safety/gods-eye', label: "God's Eye", icon: Radar, description: 'Promptable object detection' },
     ],
   },
   {
@@ -52,7 +53,6 @@ export const menuSections: MenuSection[] = [
     label: 'Analytics',
     items: [
       { id: 'analytics-dashboard', path: '/dashboard', label: 'Dashboard', icon: BarChart3, description: 'Global analytics dashboard' },
-      { id: 'gods-eye', path: '/gods-eye', label: "God's Eye (YOLOE)", icon: Radar, description: 'Promptable YOLOE live inference cockpit' },
       { id: 'alerts', path: '/analytics/alerts', label: 'Alerts', icon: Bell, description: 'Unread and historical alert activity' },
       { id: 'reports-page', path: '/reports', label: 'Reports', icon: FileText, description: 'Internal reports sitemap' },
     ],

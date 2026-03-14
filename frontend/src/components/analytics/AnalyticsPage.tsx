@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import type { ReactElement } from 'react';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie,
-  ComposedChart, Line,
+  ComposedChart, Line, RadialBarChart, RadialBar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, ReferenceLine,
 } from 'recharts';
 import {
@@ -72,6 +72,89 @@ function buildTimelineFromBuckets(buckets: FRSTimelineBucket[], granularity: Gra
       : d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
     return { label, known: b.known, unknown: b.unknown, total: b.total };
   });
+}
+
+function buildTimelineFromDetections(detections: FRSMatch[], granularity: Granularity): FRSTimelineBucket[] {
+  const map = new Map<string, FRSTimelineBucket>();
+  for (const det of detections) {
+    const ts = new Date(det.timestamp);
+    const key = granularity === 'hour'
+      ? new Date(ts.getFullYear(), ts.getMonth(), ts.getDate(), ts.getHours(), 0, 0, 0).toISOString()
+      : new Date(ts.getFullYear(), ts.getMonth(), ts.getDate(), 0, 0, 0, 0).toISOString();
+
+    const cur = map.get(key) ?? { period: key, total: 0, known: 0, unknown: 0 };
+    cur.total += 1;
+    if (isKnown(det)) cur.known += 1; else cur.unknown += 1;
+    map.set(key, cur);
+  }
+  return Array.from(map.values()).sort((a, b) => new Date(a.period).getTime() - new Date(b.period).getTime());
+}
+
+function deriveStatsFromDetections(detections: FRSMatch[]): FRSStats {
+  const byDevice = new Map<string, { deviceId: string; deviceName: string; count: number }>();
+  const byPerson = new Map<string, {
+    personId: string; personName: string; faceImageUrl: string; count: number; lastSeen: string; confSum: number;
+  }>();
+
+  let totalDetections = 0;
+  let knownDetections = 0;
+  let unknownDetections = 0;
+  let confSum = 0;
+
+  for (const det of detections) {
+    totalDetections += 1;
+    const conf = det.confidence ?? det.matchScore ?? 0;
+    confSum += conf;
+
+    if (isKnown(det)) knownDetections += 1; else unknownDetections += 1;
+
+    const deviceId = det.deviceId ?? 'unknown';
+    const deviceName = (det.device as any)?.name ?? deviceId;
+    const d = byDevice.get(deviceId) ?? { deviceId, deviceName, count: 0 };
+    d.count += 1;
+    byDevice.set(deviceId, d);
+
+    const personId = det.personId ?? (det.metadata as any)?.person_id;
+    if (personId) {
+      const personName = det.person?.name ?? (det.metadata as any)?.person_name ?? personId;
+      const faceImageUrl = det.person?.faceImageUrl ?? (det.metadata as any)?.person_face_url ?? '';
+      const p = byPerson.get(personId) ?? {
+        personId,
+        personName,
+        faceImageUrl,
+        count: 0,
+        lastSeen: det.timestamp,
+        confSum: 0,
+      };
+      p.count += 1;
+      p.confSum += conf;
+      if (new Date(det.timestamp).getTime() > new Date(p.lastSeen).getTime()) {
+        p.lastSeen = det.timestamp;
+      }
+      byPerson.set(personId, p);
+    }
+  }
+
+  const byDeviceArr = Array.from(byDevice.values()).sort((a, b) => b.count - a.count);
+  const byPersonArr = Array.from(byPerson.values())
+    .map((p) => ({
+      personId: p.personId,
+      personName: p.personName,
+      faceImageUrl: p.faceImageUrl,
+      count: p.count,
+      lastSeen: p.lastSeen,
+      avgConfidence: p.count > 0 ? p.confSum / p.count : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    totalDetections,
+    knownDetections,
+    unknownDetections,
+    avgConfidence: totalDetections > 0 ? confSum / totalDetections : 0,
+    byDevice: byDeviceArr,
+    byPerson: byPersonArr,
+  };
 }
 
 function buildHourlyPattern(detections: FRSMatch[]) {
@@ -360,7 +443,7 @@ function ChartCard({ title, subtitle, children, className, action }: {
   title: string; subtitle?: string; children: React.ReactNode; className?: string; action?: React.ReactNode;
 }) {
   return (
-    <Card className={`border border-white/5 bg-zinc-900/30 backdrop-blur-sm ${className ?? ''}`}>
+    <Card className={`border border-white/5 bg-zinc-900/30 backdrop-blur-sm h-full ${className ?? ''}`}>
       <CardHeader className="pb-2 pt-4 px-4">
         <div className="flex items-start justify-between gap-3 min-w-0 flex-wrap">
           <div className="min-w-0">
@@ -418,22 +501,25 @@ interface CamFlow { name: string; known: number; unknown: number }
 function SankeyChart({ flows, knownTotal, unknownTotal }: {
   flows: CamFlow[]; knownTotal: number; unknownTotal: number;
 }) {
+  const [hovCam, setHovCam] = useState<string | null>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const grand = knownTotal + unknownTotal;
   if (!grand || !flows.length) return (
-    <div className="flex items-center justify-center h-full text-zinc-600 text-[11px] font-mono">
-      No flow data — increase data limit to populate
-    </div>
+    <div className="flex items-center justify-center h-full text-zinc-600 text-[11px] font-mono">No flow data</div>
   );
 
-  const H = 240;
-  const NW = 10;           // node rect width
-  const VGAP = 5;          // gap between camera bars
-  const scale = (v: number) => (v / grand) * (H - VGAP * Math.max(flows.length - 1, 0));
+  const VW = 460;
+  const NW = 16;
+  const VGAP = 5;
+  const TOPY = 8;
+  const availH = Math.max(200, flows.length * 24);
+  const scale = (v: number) => (v / grand) * (availH - VGAP * Math.max(flows.length - 1, 0));
 
-  // Camera nodes (left column)
-  let camOffsetY = 0;
+  let camOffsetY = TOPY;
   const cams = flows.map(f => {
-    const h = Math.max(6, scale(f.known + f.unknown));
+    const h = Math.max(10, scale(f.known + f.unknown));
     const kH = scale(f.known);
     const uH = scale(f.unknown);
     const node = { ...f, y: camOffsetY, h, kH, uH };
@@ -441,83 +527,140 @@ function SankeyChart({ flows, knownTotal, unknownTotal }: {
     return node;
   });
 
-  // Right nodes
-  const kH_r = Math.max(8, scale(knownTotal));
-  const uH_r = Math.max(8, scale(unknownTotal));
-  const kY_r = 0;
-  const uY_r = kH_r + VGAP;
+  // Right side: stack known on top, unknown below, centered against cameras
+  const totalCamH = camOffsetY - VGAP - TOPY;
+  const kH_r = Math.max(16, scale(knownTotal));
+  const uH_r = Math.max(16, scale(unknownTotal));
+  const rightGap = 8;
+  const rightTotalH = kH_r + rightGap + uH_r;
+  const rightStartY = TOPY + Math.max(0, (totalCamH - rightTotalH) / 2);
+  const kY_r = rightStartY;
+  const uY_r = rightStartY + kH_r + rightGap;
 
-  const VW = 500;
-  const LX = 150;   // left node x (camera names sit left of this)
-  const RX = 340;   // right node x
-  const CP1X = LX + NW + (RX - LX - NW) * 0.45;
-  const CP2X = RX - (RX - LX - NW) * 0.45;
+  const LX = 100;
+  const RX = 330;
+  const CP1X = LX + NW + (RX - LX - NW) * 0.4;
+  const CP2X = RX - (RX - LX - NW) * 0.4;
 
-  const paths: ReactElement[] = [];
+  // Build ribbon paths per camera
+  const ribbonData: { cam: typeof cams[0]; kPath?: string; uPath?: string }[] = [];
   let rkOff = kY_r;
   let ruOff = uY_r;
-
   for (const cam of cams) {
+    const entry: typeof ribbonData[0] = { cam };
     if (cam.known > 0) {
-      const lT = cam.y; const lB = cam.y + cam.kH;
-      const rT = rkOff; const rB = rkOff + cam.kH;
+      const lT = cam.y, lB = cam.y + cam.kH;
+      const rT = rkOff, rB = rkOff + cam.kH;
       rkOff += cam.kH;
-      paths.push(
-        <path key={`k-${cam.name}`}
-          d={`M${LX + NW},${lT} C${CP1X},${lT} ${CP2X},${rT} ${RX},${rT} L${RX},${rB} C${CP2X},${rB} ${CP1X},${lB} ${LX + NW},${lB} Z`}
-          fill="#10b981" fillOpacity={0.15} stroke="#10b981" strokeOpacity={0.3} strokeWidth={0.5}
-        />
-      );
+      entry.kPath = `M${LX + NW},${lT} C${CP1X},${lT} ${CP2X},${rT} ${RX},${rT} L${RX},${rB} C${CP2X},${rB} ${CP1X},${lB} ${LX + NW},${lB} Z`;
     }
     if (cam.unknown > 0) {
-      const lT = cam.y + cam.kH; const lB = cam.y + cam.h;
-      const rT = ruOff; const rB = ruOff + cam.uH;
+      const lT = cam.y + cam.kH, lB = cam.y + cam.h;
+      const rT = ruOff, rB = ruOff + cam.uH;
       ruOff += cam.uH;
-      paths.push(
-        <path key={`u-${cam.name}`}
-          d={`M${LX + NW},${lT} C${CP1X},${lT} ${CP2X},${rT} ${RX},${rT} L${RX},${rB} C${CP2X},${rB} ${CP1X},${lB} ${LX + NW},${lB} Z`}
-          fill="#f59e0b" fillOpacity={0.15} stroke="#f59e0b" strokeOpacity={0.3} strokeWidth={0.5}
-        />
-      );
+      entry.uPath = `M${LX + NW},${lT} C${CP1X},${lT} ${CP2X},${rT} ${RX},${rT} L${RX},${rB} C${CP2X},${rB} ${CP1X},${lB} ${LX + NW},${lB} Z`;
     }
+    ribbonData.push(entry);
   }
 
-  const svgH = Math.max(camOffsetY - VGAP, uY_r + uH_r) + 16;
+  const svgH = Math.max(camOffsetY, uY_r + uH_r) + 8;
+  const hovData = cams.find(c => c.name === hovCam);
 
   return (
-    <svg viewBox={`0 0 ${VW} ${svgH}`} className="w-full" style={{ maxHeight: H + 40 }} preserveAspectRatio="xMidYMid meet">
-      {/* Paths */}
-      {paths}
+    <div ref={containerRef} className="relative w-full h-full"
+      onMouseMove={e => {
+        const r = containerRef.current?.getBoundingClientRect();
+        if (r) setMousePos({ x: e.clientX - r.left, y: e.clientY - r.top });
+      }}
+      onMouseLeave={() => setHovCam(null)}>
+      <svg viewBox={`0 0 ${VW} ${svgH}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
 
-      {/* Camera nodes */}
-      {cams.map((cam, i) => (
-        <g key={cam.name}>
-          <rect x={LX} y={cam.y} width={NW} height={Math.max(2, cam.h)} rx={2} fill={INDIGO_PALETTE[i % INDIGO_PALETTE.length]} />
-          {/* Name label */}
-          <text x={LX - 6} y={cam.y + cam.h / 2 + 3} fontSize={9} fill="#a1a1aa" textAnchor="end" fontFamily="monospace">
-            {cam.name.length > 16 ? cam.name.slice(0, 15) + '…' : cam.name}
-          </text>
-          {/* Count label inside or below */}
-          <text x={LX - 6} y={cam.y + cam.h / 2 + 12} fontSize={7.5} fill="#52525b" textAnchor="end" fontFamily="monospace">
-            {fmtN(cam.known + cam.unknown)}
-          </text>
-        </g>
-      ))}
+        {/* Ribbons + invisible hover zones per camera */}
+        {ribbonData.map(({ cam, kPath, uPath }, i) => {
+          const isHov = hovCam === null || hovCam === cam.name;
+          return (
+            <g key={cam.name}
+              onMouseEnter={() => setHovCam(cam.name)}
+              className="cursor-pointer">
+              {/* Invisible wide hit area spanning full row */}
+              <rect x={0} y={cam.y - 2} width={VW} height={cam.h + 4} fill="transparent" />
+              {kPath && (
+                <path d={kPath}
+                  fill="#10b981" fillOpacity={isHov ? 0.3 : 0.06}
+                  stroke="#10b981" strokeOpacity={isHov ? 0.6 : 0.12} strokeWidth={0.5}
+                  className="transition-all duration-200" />
+              )}
+              {uPath && (
+                <path d={uPath}
+                  fill="#f59e0b" fillOpacity={isHov ? 0.3 : 0.06}
+                  stroke="#f59e0b" strokeOpacity={isHov ? 0.6 : 0.12} strokeWidth={0.5}
+                  className="transition-all duration-200" />
+              )}
+              {/* Left bar */}
+              <rect x={LX} y={cam.y} width={NW} height={Math.max(6, cam.h)} rx={4}
+                fill={INDIGO_PALETTE[i % INDIGO_PALETTE.length]}
+                opacity={isHov ? 1 : 0.3}
+                className="transition-opacity duration-200" />
+              {hovCam === cam.name && (
+                <rect x={LX - 1} y={cam.y - 1} width={NW + 2} height={cam.h + 2} rx={5}
+                  fill="none" stroke={INDIGO_PALETTE[i % INDIGO_PALETTE.length]} strokeWidth={1.5} strokeOpacity={0.6} />
+              )}
+              {/* Camera label */}
+              <text x={LX - 8} y={cam.y + cam.h / 2 + 3.5} fontSize={10}
+                fill={hovCam === cam.name ? '#f4f4f5' : isHov ? '#a1a1aa' : '#52525b'}
+                textAnchor="end" fontFamily="monospace" fontWeight={hovCam === cam.name ? '600' : '400'}
+                className="transition-all duration-200">
+                {cam.name}
+              </text>
+            </g>
+          );
+        })}
 
-      {/* Known node */}
-      <rect x={RX} y={kY_r} width={NW} height={Math.max(2, kH_r)} rx={2} fill="#10b981" />
-      <text x={RX + NW + 6} y={kY_r + kH_r / 2 + 3} fontSize={9} fill="#10b981" fontFamily="monospace" fontWeight="600">Known</text>
-      <text x={RX + NW + 6} y={kY_r + kH_r / 2 + 13} fontSize={7.5} fill="#52525b" fontFamily="monospace">{fmtN(knownTotal)}</text>
+        {/* Right nodes */}
+        <rect x={RX} y={kY_r} width={NW} height={Math.max(6, kH_r)} rx={4} fill="#10b981" />
+        <text x={RX + NW + 8} y={kY_r + kH_r / 2 - 1} fontSize={11} fill="#10b981" fontFamily="monospace" fontWeight="700">Known</text>
+        <text x={RX + NW + 8} y={kY_r + kH_r / 2 + 12} fontSize={9} fill="#71717a" fontFamily="monospace">{fmtN(knownTotal)}</text>
 
-      {/* Unknown node */}
-      <rect x={RX} y={uY_r} width={NW} height={Math.max(2, uH_r)} rx={2} fill="#f59e0b" />
-      <text x={RX + NW + 6} y={uY_r + uH_r / 2 + 3} fontSize={9} fill="#f59e0b" fontFamily="monospace" fontWeight="600">Unknown</text>
-      <text x={RX + NW + 6} y={uY_r + uH_r / 2 + 13} fontSize={7.5} fill="#52525b" fontFamily="monospace">{fmtN(unknownTotal)}</text>
+        <rect x={RX} y={uY_r} width={NW} height={Math.max(6, uH_r)} rx={4} fill="#f59e0b" />
+        <text x={RX + NW + 8} y={uY_r + uH_r / 2 - 1} fontSize={11} fill="#f59e0b" fontFamily="monospace" fontWeight="700">Unknown</text>
+        <text x={RX + NW + 8} y={uY_r + uH_r / 2 + 12} fontSize={9} fill="#71717a" fontFamily="monospace">{fmtN(unknownTotal)}</text>
+      </svg>
 
-      {/* Header labels */}
-      <text x={LX + NW / 2} y={svgH - 2} fontSize={8} fill="#3f3f46" textAnchor="middle" fontFamily="monospace">Cameras</text>
-      <text x={RX + NW / 2} y={svgH - 2} fontSize={8} fill="#3f3f46" textAnchor="middle" fontFamily="monospace">Outcome</text>
-    </svg>
+      {/* Tooltip */}
+      {hovData && (
+        <div className="pointer-events-none absolute z-50 transition-all duration-100"
+          style={{
+            left: Math.min(mousePos.x + 14, (containerRef.current?.clientWidth ?? 400) - 180),
+            top: Math.max(mousePos.y - 80, 4),
+          }}>
+          <div className="bg-zinc-900/95 border border-white/10 backdrop-blur-md rounded-lg px-3 py-2.5 shadow-2xl min-w-[160px]">
+            <p className="text-[11px] font-mono font-semibold text-zinc-200 mb-2">{hovData.name}</p>
+            <div className="space-y-1.5">
+              <div className="flex justify-between gap-4">
+                <span className="flex items-center gap-1.5 text-zinc-400 text-[10px] font-mono">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />Known
+                </span>
+                <span className="text-emerald-400 text-xs font-mono font-bold">{fmtN(hovData.known)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="flex items-center gap-1.5 text-zinc-400 text-[10px] font-mono">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />Unknown
+                </span>
+                <span className="text-amber-400 text-xs font-mono font-bold">{fmtN(hovData.unknown)}</span>
+              </div>
+              <div className="flex justify-between gap-4 pt-1.5 border-t border-white/5">
+                <span className="text-zinc-500 text-[10px] font-mono">Total</span>
+                <span className="text-zinc-300 text-xs font-mono font-bold">{fmtN(hovData.known + hovData.unknown)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-zinc-500 text-[10px] font-mono">Share</span>
+                <span className="text-zinc-300 text-xs font-mono font-bold">{((hovData.known + hovData.unknown) / grand * 100).toFixed(1)}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -527,14 +670,28 @@ function BumpChart({ data, colors, labels }: { data: { name: string; ranks: (num
   const [hov, setHov] = useState<number | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const [animProg, setAnimProg] = useState(0);
 
-  const VW = 500, VH = 200, PAD = 20;
+  useEffect(() => {
+    let raf: number;
+    const start = performance.now();
+    const dur = 1000;
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / dur, 1);
+      setAnimProg(1 - Math.pow(1 - t, 3));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [data]);
+
+  const VW = 500, VH = 220, PADL = 36, PADR = 20, PADT = 20, PADB = 28;
   if (!data.length || !data[0].ranks.length) return <div className="h-full flex items-center justify-center text-zinc-600 text-[11px] font-mono">Insufficient data for trace</div>;
 
   const steps = data[0].ranks.length;
   const maxRank = Math.max(...data.flatMap(d => d.ranks.filter(r => r !== null) as number[]), 1);
-  const dx = (VW - PAD * 2) / (steps - 1 || 1);
-  const dy = (VH - PAD * 2) / (maxRank - 1 || 1);
+  const dx = (VW - PADL - PADR) / (steps - 1 || 1);
+  const dy = (VH - PADT - PADB) / (maxRank - 1 || 1);
 
   return (
     <div ref={containerRef} className="relative w-full h-full"
@@ -545,36 +702,81 @@ function BumpChart({ data, colors, labels }: { data: { name: string; ranks: (num
       onMouseLeave={() => setHov(null)}
     >
       <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-full">
-        <g opacity={0.1}>
-          {Array.from({ length: maxRank }).map((_, i) => (
-            <line key={i} x1={PAD} y1={PAD + i * dy} x2={VW - PAD} y2={PAD + i * dy} stroke="white" strokeWidth={0.5} />
+        <defs>
+          {data.map((_, i) => (
+            <filter key={i} id={`glow-bump-${i}`}>
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
           ))}
-        </g>
+        </defs>
+
+        {/* Rank labels + grid */}
+        {Array.from({ length: maxRank }).map((_, i) => (
+          <g key={i}>
+            <line x1={PADL} y1={PADT + i * dy} x2={VW - PADR} y2={PADT + i * dy}
+              stroke="rgba(255,255,255,0.05)" strokeWidth={0.5} strokeDasharray="4 4" />
+            <text x={PADL - 6} y={PADT + i * dy + 3.5} fontSize={8} fill="#52525b" textAnchor="end" fontFamily="monospace">
+              #{i + 1}
+            </text>
+          </g>
+        ))}
+
+        {/* Lines */}
         {data.map((series, i) => {
-          const points = series.ranks.map((r, idx) => r === null ? null : {
-            x: PAD + idx * dx,
-            y: PAD + (r - 1) * dy
+          const pts = series.ranks.map((r, idx) => r === null ? null : {
+            x: PADL + idx * dx,
+            y: PADT + (r - 1) * dy
           }).filter(p => p !== null) as { x: number; y: number }[];
 
-          if (points.length < 2) return null;
+          if (pts.length < 2) return null;
 
-          const d = points.reduce((acc, p, idx) => {
+          const pathD = pts.reduce((acc, p, idx) => {
             if (idx === 0) return `M ${p.x} ${p.y}`;
-            const prev = points[idx - 1];
-            const cpx1 = prev.x + (p.x - prev.x) / 2;
-            return `${acc} C ${cpx1} ${prev.y} ${cpx1} ${p.y} ${p.x} ${p.y}`;
+            const prev = pts[idx - 1];
+            const mx = (prev.x + p.x) / 2;
+            return `${acc} C ${mx} ${prev.y} ${mx} ${p.y} ${p.x} ${p.y}`;
           }, '');
 
+          const isActive = hov === null || hov === i;
+          const col = colors[i % colors.length];
+          // Clip path length by animation progress
+          const totalLen = pts.length * dx;
+
           return (
-            <g key={series.name} className="group/line" onMouseEnter={() => setHov(i)}>
-              <path d={d} fill="none" stroke={colors[i % colors.length]} strokeWidth={hov === i ? 4 : 2.5}
-                strokeLinecap="round" strokeOpacity={hov === null || hov === i ? 0.7 : 0.15}
-                className="transition-all duration-300" />
-              {points.map((p, pidx) => (
-                <circle key={pidx} cx={p.x} cy={p.y} r={hov === i ? 4 : 3}
-                  fill={colors[i % colors.length]} fillOpacity={hov === null || hov === i ? 1 : 0.2}
-                  className="transition-all duration-300" />
-              ))}
+            <g key={series.name} onMouseEnter={() => setHov(i)} className="cursor-pointer">
+              {/* Glow shadow */}
+              {hov === i && (
+                <path d={pathD} fill="none" stroke={col} strokeWidth={8}
+                  strokeLinecap="round" strokeOpacity={0.15} filter={`url(#glow-bump-${i})`} />
+              )}
+              {/* Main line */}
+              <path d={pathD} fill="none" stroke={col}
+                strokeWidth={hov === i ? 3.5 : 2}
+                strokeLinecap="round" strokeOpacity={isActive ? 0.85 : 0.1}
+                strokeDasharray={totalLen} strokeDashoffset={totalLen * (1 - animProg)}
+                className="transition-[stroke-width,stroke-opacity] duration-300" />
+              {/* Dots */}
+              {pts.map((p, pidx) => {
+                const dotProg = Math.max(0, Math.min(1, (animProg * pts.length - pidx) * 2));
+                return (
+                  <g key={pidx}>
+                    {hov === i && <circle cx={p.x} cy={p.y} r={8} fill={col} fillOpacity={0.1} />}
+                    <circle cx={p.x} cy={p.y} r={(hov === i ? 5 : 3.5) * dotProg}
+                      fill={col} fillOpacity={isActive ? 1 : 0.15}
+                      stroke="#09090b" strokeWidth={1.5}
+                      className="transition-all duration-300" />
+                  </g>
+                );
+              })}
+              {/* End label */}
+              {animProg > 0.8 && pts.length > 0 && (
+                <text x={pts[pts.length - 1].x + 6} y={pts[pts.length - 1].y + 3}
+                  fontSize={8} fill={isActive ? col : '#3f3f46'} fontFamily="monospace" fontWeight="600"
+                  className="transition-all duration-300">
+                  {series.name.length > 10 ? series.name.slice(0, 9) + '..' : series.name}
+                </text>
+              )}
             </g>
           );
         })}
@@ -611,19 +813,27 @@ function RidgelineChart({ data, colors }: { data: { name: string; values: number
       <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-full">
         {data.map((series, i) => {
           const yBase = PAD + i * rowH * (1 - overlap) + rowH;
-          const pts = series.values.map((v, idx) => {
-            const x = PAD + (idx / (series.values.length - 1)) * (VW - PAD * 2);
-            const y = yBase - (v / maxVal) * rowH;
-            return `${x},${y}`;
-          }).join(' ');
+          const points = series.values.map((v, idx) => ({
+            x: PAD + (idx / (series.values.length - 1)) * (VW - PAD * 2),
+            y: yBase - (v / maxVal) * rowH,
+          }));
 
-          const path = `M ${PAD},${yBase} L ${pts} L ${VW - PAD},${yBase} Z`;
+          // Build smooth cubic bezier curve through points
+          let curvePath = `M ${points[0].x},${yBase} L ${points[0].x},${points[0].y}`;
+          for (let j = 0; j < points.length - 1; j++) {
+            const p0 = points[j];
+            const p1 = points[j + 1];
+            const mx = (p0.x + p1.x) / 2;
+            curvePath += ` C ${mx},${p0.y} ${mx},${p1.y} ${p1.x},${p1.y}`;
+          }
+          curvePath += ` L ${points[points.length - 1].x},${yBase} Z`;
+
           const color = colors[i % colors.length];
           const isHov = hov === i;
 
           return (
             <g key={series.name} onMouseEnter={() => setHov(i)}>
-              <path d={path} fill={color} fillOpacity={hov === null ? 0.3 : (isHov ? 0.6 : 0.05)}
+              <path d={curvePath} fill={color} fillOpacity={hov === null ? 0.3 : (isHov ? 0.6 : 0.05)}
                 stroke={color} strokeWidth={isHov ? 2 : 1} strokeOpacity={hov === null || isHov ? 1 : 0.2}
                 className="transition-all duration-300 cursor-pointer" />
               <text x={PAD - 4} y={yBase - 4} fontSize={8} fill={color} textAnchor="end" fontFamily="monospace"
@@ -722,60 +932,147 @@ const ChordDiagram = memo(function ChordDiagram({ matrix, labels, colors }: { ma
 // ── Marimekko chart ───────────────────────────────────────────────────────────
 
 function MarimekkoChart({ data }: { data: { name: string; known: number; unknown: number; total: number }[] }) {
+  const [hovIdx, setHovIdx] = useState<number | null>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [animProgress, setAnimProgress] = useState(0);
+
+  useEffect(() => {
+    let raf: number;
+    const start = performance.now();
+    const dur = 800;
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / dur, 1);
+      // ease-out cubic
+      setAnimProgress(1 - Math.pow(1 - t, 3));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [data]);
+
   const totalAll = data.reduce((s, d) => s + d.total, 0);
   if (!totalAll || !data.length) return (
     <div className="flex items-center justify-center h-full text-zinc-600 text-[11px] font-mono">No data</div>
   );
-  const VW = 500, VH = 185, LBL_H = 22;
+  const VW = 500, VH = 185, LBL_H = 24;
   const chartH = VH - LBL_H;
   const GAP = 2;
   const availW = VW - GAP * (data.length - 1);
   let xOff = 0;
-  const rects = data.map(d => {
+  const rects = data.map((d, i) => {
     const w = (d.total / totalAll) * availW;
     const knownH = d.total > 0 ? (d.known / d.total) * chartH : 0;
-    const r = { ...d, x: xOff, w, knownH, unknownH: chartH - knownH };
+    const r = { ...d, idx: i, x: xOff, w, knownH, unknownH: chartH - knownH };
     xOff += w + GAP;
     return r;
   });
+
+  const hov = hovIdx !== null ? rects[hovIdx] : null;
+
   return (
-    <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full" style={{ maxHeight: VH }}>
-      {[0.25, 0.5, 0.75].map(f => (
-        <g key={f}>
-          <line x1={0} y1={chartH * f} x2={VW} y2={chartH * f}
-            stroke="rgba(255,255,255,0.04)" strokeWidth={0.5} strokeDasharray="3 3" />
-          <text x={VW} y={chartH * f - 2} fontSize={6} fill="#3f3f46" textAnchor="end" fontFamily="monospace">
-            {((1 - f) * 100).toFixed(0)}% known
-          </text>
-        </g>
-      ))}
-      {rects.map(r => {
-        const knownPct = r.total > 0 ? ((r.known / r.total) * 100).toFixed(0) : '0';
-        const sharePct = ((r.total / totalAll) * 100).toFixed(0);
-        const shortName = r.name.length > 9 ? r.name.slice(0, 8) + '…' : r.name;
-        return (
-          <g key={r.name}>
-            <rect x={r.x} y={0} width={Math.max(0, r.w)} height={r.unknownH} fill="#f59e0b" fillOpacity={0.38} />
-            <rect x={r.x} y={r.unknownH} width={Math.max(0, r.w)} height={r.knownH} fill="#10b981" fillOpacity={0.52} />
-            <rect x={r.x} y={0} width={Math.max(0, r.w)} height={chartH} fill="none" stroke="rgba(0,0,0,0.3)" strokeWidth={0.5} />
-            {r.knownH > 14 && r.w > 28 && (
-              <text x={r.x + r.w / 2} y={r.unknownH + r.knownH / 2 + 3}
-                fontSize={7} fill="#10b981" textAnchor="middle" fontFamily="monospace" opacity={0.9}>
-                {knownPct}%
-              </text>
-            )}
-            {r.w > 22 && (
-              <text x={r.x + r.w / 2} y={9} fontSize={6.5} fill="#a1a1aa" textAnchor="middle" fontFamily="monospace">
-                {sharePct}%
-              </text>
-            )}
-            <text x={r.x + r.w / 2} y={VH - 5} fontSize={6.5} fill="#71717a" textAnchor="middle" fontFamily="monospace">
-              {r.w > 28 ? shortName : r.w > 14 ? r.name.slice(0, 3) : ''}
+    <div ref={containerRef} className="relative w-full h-full"
+      onMouseMove={e => {
+        const r = containerRef.current?.getBoundingClientRect();
+        if (r) setMousePos({ x: e.clientX - r.left, y: e.clientY - r.top });
+      }}
+      onMouseLeave={() => setHovIdx(null)}>
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet"
+        onMouseLeave={() => setHovIdx(null)}>
+        {/* Grid lines */}
+        {[0.25, 0.5, 0.75].map(f => (
+          <g key={f}>
+            <line x1={0} y1={chartH * f} x2={VW} y2={chartH * f}
+              stroke="rgba(255,255,255,0.04)" strokeWidth={0.5} strokeDasharray="3 3" />
+            <text x={VW - 2} y={chartH * f - 3} fontSize={6.5} fill="#3f3f46" textAnchor="end" fontFamily="monospace">
+              {((1 - f) * 100).toFixed(0)}%
             </text>
           </g>
-        );
-      })}
-    </svg>
+        ))}
+
+        {/* Bars */}
+        {rects.map(r => {
+          const isActive = hovIdx === null || hovIdx === r.idx;
+          const knownPct = r.total > 0 ? ((r.known / r.total) * 100).toFixed(0) : '0';
+          const shortName = r.name.length > 9 ? r.name.slice(0, 8) + '...' : r.name;
+          // Animate: bars grow from bottom
+          const animH = chartH * animProgress;
+          const aUnknownH = r.unknownH * animProgress;
+          const aKnownH = r.knownH * animProgress;
+          const yStart = chartH - animH;
+          return (
+            <g key={r.name} onMouseEnter={() => setHovIdx(r.idx)} className="cursor-pointer">
+              {/* Unknown (top) */}
+              <rect x={r.x} y={yStart} width={Math.max(0, r.w)} height={aUnknownH}
+                rx={r.w > 6 ? 2 : 0}
+                fill="#f59e0b" fillOpacity={isActive ? 0.45 : 0.12}
+                className="transition-all duration-200" />
+              {/* Known (bottom) */}
+              <rect x={r.x} y={yStart + aUnknownH} width={Math.max(0, r.w)} height={aKnownH}
+                rx={r.w > 6 ? 2 : 0}
+                fill="#10b981" fillOpacity={isActive ? 0.6 : 0.15}
+                className="transition-all duration-200" />
+              {/* Hover highlight border */}
+              {hovIdx === r.idx && (
+                <rect x={r.x - 0.5} y={yStart - 0.5} width={Math.max(0, r.w + 1)} height={animH + 1}
+                  rx={r.w > 6 ? 2 : 0}
+                  fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={1} />
+              )}
+              {/* Known % inside bar */}
+              {animProgress > 0.8 && r.knownH > 16 && r.w > 30 && (
+                <text x={r.x + r.w / 2} y={yStart + aUnknownH + aKnownH / 2 + 3}
+                  fontSize={8} fill="#10b981" textAnchor="middle" fontFamily="monospace" fontWeight="600"
+                  opacity={isActive ? 0.9 : 0.3} className="transition-opacity duration-200">
+                  {knownPct}%
+                </text>
+              )}
+              {/* Camera name label */}
+              {animProgress > 0.5 && (
+                <text x={r.x + r.w / 2} y={VH - 5} fontSize={7} textAnchor="middle" fontFamily="monospace"
+                  fill={hovIdx === r.idx ? '#e4e4e7' : '#71717a'} className="transition-all duration-200">
+                  {r.w > 30 ? shortName : r.w > 16 ? r.name.slice(0, 4) : ''}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Floating tooltip */}
+      {hov && (
+        <div className="pointer-events-none absolute z-50 transition-opacity duration-150"
+          style={{
+            left: Math.min(mousePos.x + 12, (containerRef.current?.clientWidth ?? 400) - 170),
+            top: Math.max(mousePos.y - 70, 4),
+          }}>
+          <div className="bg-zinc-900/95 border border-white/10 backdrop-blur-md rounded-lg px-3 py-2.5 shadow-xl min-w-[150px]">
+            <p className="text-[11px] font-mono font-semibold text-zinc-200 mb-1.5">{hov.name}</p>
+            <div className="space-y-1">
+              <div className="flex justify-between gap-4">
+                <span className="flex items-center gap-1.5 text-zinc-400 text-[10px] font-mono">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />Known
+                </span>
+                <span className="text-emerald-400 text-xs font-mono font-bold">{fmtN(hov.known)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="flex items-center gap-1.5 text-zinc-400 text-[10px] font-mono">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />Unknown
+                </span>
+                <span className="text-amber-400 text-xs font-mono font-bold">{fmtN(hov.unknown)}</span>
+              </div>
+              <div className="flex justify-between gap-4 pt-1 border-t border-white/5">
+                <span className="text-zinc-500 text-[10px] font-mono">Total</span>
+                <span className="text-zinc-300 text-xs font-mono font-bold">{fmtN(hov.total)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-zinc-500 text-[10px] font-mono">Share</span>
+                <span className="text-zinc-300 text-xs font-mono font-bold">{((hov.total / totalAll) * 100).toFixed(1)}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -849,7 +1146,7 @@ export function AnalyticsPage() {
 
   // ── Derived values ──
   const dets = stats.frsDetections ?? [];
-  const frsStats = stats.frsStats;
+  const frsStats = useMemo(() => stats.frsStats ?? deriveStatsFromDetections(dets), [stats.frsStats, dets]);
   const totalDet = frsStats?.totalDetections ?? 0;
   const knownDet = frsStats?.knownDetections ?? 0;
   const unknownDet = frsStats?.unknownDetections ?? 0;
@@ -944,7 +1241,49 @@ export function AnalyticsPage() {
     });
   }, [frsStats, cameraFlows]);
 
-  const timelineData = useMemo(() => buildTimelineFromBuckets(stats.frsTimeline ?? [], granularity), [stats.frsTimeline, granularity]);
+  const timelineData = useMemo(() => {
+    const buckets = (stats.frsTimeline && stats.frsTimeline.length > 0)
+      ? stats.frsTimeline
+      : buildTimelineFromDetections(dets, granularity);
+    return buildTimelineFromBuckets(buckets, granularity);
+  }, [stats.frsTimeline, dets, granularity]);
+
+  // Per-camera stream data for the multi-layer stream graph
+  const STREAM_BLUES = ['#0c2d48', '#145680', '#1a74a8', '#2b8cc4', '#4da6d8', '#7dc0e6', '#aed8f0'];
+  const streamCamData = useMemo(() => {
+    const topCams = cameraFlows.slice(0, 7).map(f => f.name);
+    if (!topCams.length || !dets.length) return { labels: [] as string[], cameras: [] as string[], rows: [] as Record<string, number>[] };
+    const buckets = (stats.frsTimeline && stats.frsTimeline.length > 0)
+      ? stats.frsTimeline
+      : buildTimelineFromDetections(dets, granularity);
+    const periods = buckets.map(b => {
+      const d = new Date(b.period);
+      return granularity === 'hour'
+        ? `${d.getHours().toString().padStart(2, '0')}:00`
+        : d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+    });
+    // Count per camera per period
+    const periodKeys = buckets.map(b => new Date(b.period).getTime());
+    const camCounts: Record<string, number[]> = {};
+    for (const name of topCams) camCounts[name] = Array(periodKeys.length).fill(0);
+    for (const det of dets) {
+      const camName = (det.device as any)?.name ?? det.deviceId ?? 'Camera';
+      if (!camCounts[camName]) continue;
+      const ts = new Date(det.timestamp).getTime();
+      let pIdx = periodKeys.length - 1;
+      for (let i = 0; i < periodKeys.length - 1; i++) {
+        if (ts >= periodKeys[i] && ts < periodKeys[i + 1]) { pIdx = i; break; }
+      }
+      camCounts[camName][pIdx]++;
+    }
+    const rows = periodKeys.map((_, idx) => {
+      const row: Record<string, number> = { label: periods[idx] as any };
+      for (const cam of topCams) row[cam] = camCounts[cam][idx];
+      return row;
+    });
+    return { labels: periods, cameras: topCams, rows };
+  }, [cameraFlows, dets, stats.frsTimeline, granularity]);
+
   const hourlyData = useMemo(() => buildHourlyPattern(dets), [dets]);
   const confidenceDist = useMemo(() => buildConfidenceDist(dets), [dets]);
 
@@ -962,8 +1301,10 @@ export function AnalyticsPage() {
 
   const chordData = useMemo(() => {
     const topCams = cameraPareto.slice(0, 6).map(c => c.name);
-    const labels = [...topCams, 'Morning', 'Afternoon', 'Evening', 'Night'];
+    const timeSlots = ['Morning', 'Afternoon', 'Evening', 'Night'];
+    const labels = [...topCams, ...timeSlots];
     const matrix = Array.from({ length: labels.length }, () => Array(labels.length).fill(0));
+    const n = topCams.length;
 
     for (const det of dets) {
       const camName = (det.device as any)?.name ?? det.deviceId ?? 'Camera';
@@ -971,11 +1312,12 @@ export function AnalyticsPage() {
       if (camIdx === -1) continue;
 
       const hour = new Date(det.timestamp).getHours();
-      let slot = 6; // night
-      if (hour >= 6 && hour < 12) slot = 6; // morning
-      else if (hour >= 12 && hour < 17) slot = 7; // afternoon
-      else if (hour >= 17 && hour < 21) slot = 8; // evening
-      else slot = 9; // night
+      let slotOffset: number;
+      if (hour >= 6 && hour < 12) slotOffset = 0; // morning
+      else if (hour >= 12 && hour < 17) slotOffset = 1; // afternoon
+      else if (hour >= 17 && hour < 21) slotOffset = 2; // evening
+      else slotOffset = 3; // night
+      const slot = n + slotOffset;
 
       matrix[camIdx][slot]++;
       matrix[slot][camIdx]++;
@@ -997,17 +1339,35 @@ export function AnalyticsPage() {
 
   const bumpData = useMemo(() => {
     const topCams = cameraPareto.slice(0, 5).map(c => c.name);
-    if (!stats.frsTimeline?.length) return [];
+    const timeline = stats.frsTimeline;
+    if (!topCams.length || !dets.length || !timeline?.length || timeline.length < 2) return [];
 
-    return topCams.map(name => {
-      const ranks = stats.frsTimeline!.map(() => {
+    // Build count per camera per time period from raw detections
+    const periods = timeline.map(b => new Date(b.period).getTime());
+    const camCounts: Record<string, number[]> = {};
+    for (const name of topCams) camCounts[name] = Array(periods.length).fill(0);
 
-        // This is a simplification
-        return Math.floor(Math.random() * 5) + 1;
-      });
-      return { name, ranks };
-    });
-  }, [stats.frsTimeline, cameraPareto]);
+    for (const det of dets) {
+      const camName = (det.device as any)?.name ?? det.deviceId ?? 'Camera';
+      if (!camCounts[camName]) continue;
+      const ts = new Date(det.timestamp).getTime();
+      let pIdx = periods.length - 1;
+      for (let i = 0; i < periods.length - 1; i++) {
+        if (ts >= periods[i] && ts < periods[i + 1]) { pIdx = i; break; }
+      }
+      camCounts[camName][pIdx]++;
+    }
+
+    return topCams.map(name => ({
+      name,
+      ranks: periods.map((_, pIdx) => {
+        const myCount = camCounts[name][pIdx];
+        if (myCount === 0) return null;
+        const sorted = topCams.map(c => camCounts[c][pIdx]).sort((a, b) => b - a);
+        return sorted.indexOf(myCount) + 1;
+      }),
+    }));
+  }, [stats.frsTimeline, cameraPareto, dets]);
 
 
   return (
@@ -1339,7 +1699,7 @@ export function AnalyticsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, delay: 0.9 }}>
+            <motion.div className="h-full" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, delay: 0.9 }}>
               <ChartCard
                 title="Camera Detection Flow"
                 subtitle="Ribbons trace each camera's detections (left) into known (green) or unknown (amber) outcomes on the right."
@@ -1351,7 +1711,7 @@ export function AnalyticsPage() {
                   ]} />
                 }
               >
-                <div className="h-52 flex items-center">
+                <div className="h-[340px] w-full flex items-center">
                   <SankeyChart
                     flows={cameraFlows}
                     knownTotal={cameraFlows.reduce((s, f) => s + f.known, 0)}
@@ -1361,7 +1721,7 @@ export function AnalyticsPage() {
               </ChartCard>
             </motion.div>
 
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, delay: 1.0 }}>
+            <motion.div className="h-full" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, delay: 1.0 }}>
               <ChartCard
                 title="Camera Cross-Detection"
                 subtitle="Circular flow showing the relationship between cameras and detection time slots. Click or hover segments to isolate specific camera paths."
@@ -1389,44 +1749,64 @@ export function AnalyticsPage() {
             <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 1.1 }}>
               <ChartCard
                 title="Detection Stream"
-                subtitle="A fluid stream chart showing known (green) and unknown (amber) detection volumes flowing over time. The wave shape reveals rhythm and spikes in activity — wide sections mean high-volume periods."
-                action={<ColorLegend items={[{ label: 'Known', color: '#10b981' }, { label: 'Unknown', color: '#f59e0b' }]} />}
+                subtitle="Multi-layer stream showing per-camera detection volume over time. Each layer is one camera — wider bands mean higher activity."
+                action={<ColorLegend items={streamCamData.cameras.slice(0, 5).map((c, i) => ({ label: c, color: STREAM_BLUES[i % STREAM_BLUES.length] }))} />}
               >
-                {timelineData.some(d => d.total > 0) ? (
-                  <div className="h-44">
+                {streamCamData.rows.length > 0 && streamCamData.cameras.length > 0 ? (
+                  <motion.div className="h-56"
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                    transition={{ duration: 0.8 }}>
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={timelineData} stackOffset="wiggle"
-                        margin={{ left: 0, right: 4, top: 6, bottom: 18 }}>
-                        <defs>
-                          <linearGradient id="sgKnown" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.5} />
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0.15} />
-                          </linearGradient>
-                          <linearGradient id="sgUnknown" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.45} />
-                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.1} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                      <AreaChart data={streamCamData.rows} stackOffset="silhouette"
+                        margin={{ left: 0, right: 0, top: 4, bottom: 20 }}>
                         <XAxis dataKey="label"
-                          tick={{ fill: '#52525b', fontSize: 8.5, fontFamily: 'monospace' }}
+                          tick={{ fill: '#52525b', fontSize: 8, fontFamily: 'monospace' }}
                           axisLine={false} tickLine={false}
-                          interval={Math.max(1, Math.floor(timelineData.length / 8))}
-                          label={{ value: 'Time', position: 'insideBottomRight', offset: -4, fill: '#3f3f46', fontSize: 8 }}
+                          interval={Math.max(1, Math.floor(streamCamData.rows.length / 10))}
                         />
                         <YAxis hide />
-                        <Tooltip content={<StreamTooltip />} cursor={{ stroke: 'rgba(255,255,255,0.06)', strokeWidth: 1 }} />
-                        <Area type="monotone" dataKey="unknown" name="Unknown" stackId="1"
-                          stroke="#f59e0b" strokeWidth={1} fill="url(#sgUnknown)" dot={false} activeDot={{ r: 3, fill: '#f59e0b' }} />
-                        <Area type="monotone" dataKey="known" name="Known" stackId="1"
-                          stroke="#10b981" strokeWidth={1} fill="url(#sgKnown)" dot={false} activeDot={{ r: 3, fill: '#10b981' }} />
+                        <Tooltip
+                          content={({ active, payload, label }: any) => {
+                            if (!active || !payload?.length) return null;
+                            const total = payload.reduce((s: number, p: any) => s + (Math.abs(p.value) || 0), 0);
+                            return (
+                              <div className="bg-zinc-900/95 border border-white/10 backdrop-blur-md rounded-lg px-3 py-2.5 shadow-2xl min-w-[165px]">
+                                <p className="text-[11px] font-mono font-semibold text-zinc-200 mb-1.5">{label}</p>
+                                <div className="space-y-1">
+                                  {[...payload].reverse().filter((p: any) => Math.abs(p.value) > 0).map((p: any, i: number) => (
+                                    <div key={i} className="flex justify-between gap-3">
+                                      <span className="flex items-center gap-1.5 text-zinc-400 text-[10px] font-mono">
+                                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: p.fill || p.color || p.stroke }} />{p.name}
+                                      </span>
+                                      <span className="text-zinc-200 text-xs font-mono font-bold">{fmtN(Math.abs(p.value))}</span>
+                                    </div>
+                                  ))}
+                                  <div className="flex justify-between gap-3 pt-1.5 border-t border-white/5">
+                                    <span className="text-zinc-500 text-[10px] font-mono">Total</span>
+                                    <span className="text-zinc-100 text-xs font-mono font-bold">{fmtN(total)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }}
+                          cursor={{ stroke: 'rgba(255,255,255,0.25)', strokeWidth: 1, strokeDasharray: '4 2' }}
+                        />
+                        {streamCamData.cameras.map((cam, i) => (
+                          <Area key={cam} type="natural" dataKey={cam} name={cam} stackId="1"
+                            stroke="none" strokeWidth={0}
+                            fill={STREAM_BLUES[i % STREAM_BLUES.length]} fillOpacity={1}
+                            dot={false}
+                            activeDot={{ r: 3, fill: '#fff', stroke: STREAM_BLUES[i % STREAM_BLUES.length], strokeWidth: 2 }}
+                            isAnimationActive animationDuration={1800} animationEasing="ease-out"
+                            animationBegin={i * 60} />
+                        ))}
                       </AreaChart>
                     </ResponsiveContainer>
-                  </div>
+                  </motion.div>
                 ) : (
-                  <Empty className="min-h-0 h-44">
+                  <Empty className="min-h-0 h-52">
                     <EmptyIcon><Activity /></EmptyIcon>
-                    <EmptyTitle>No timeline data</EmptyTitle>
+                    <EmptyTitle>No stream data</EmptyTitle>
                   </Empty>
                 )}
               </ChartCard>
@@ -1439,7 +1819,7 @@ export function AnalyticsPage() {
                 action={<ColorLegend items={[{ label: 'Known', color: '#10b981' }, { label: 'Unknown', color: '#f59e0b' }]} />}
               >
                 {cameraStackData.length > 0 ? (
-                  <div className="h-44 flex items-center">
+                  <div className="h-48 flex items-center">
                     <MarimekkoChart data={cameraStackData} />
                   </div>
                 ) : (
@@ -1451,6 +1831,55 @@ export function AnalyticsPage() {
               </ChartCard>
             </motion.div>
           </div>
+        )}
+
+        {/* ── Radial Activity Chart ── */}
+        {!loading && frsStats.byDevice.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 1.25 }}>
+            <ChartCard
+              title="Camera Activity Radial"
+              subtitle="Each arc represents one camera's detection share relative to the busiest camera. Longer arcs indicate higher-volume sources."
+            >
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadialBarChart
+                    cx="50%" cy="55%"
+                    innerRadius="15%" outerRadius="90%"
+                    data={frsStats.byDevice.slice(0, 8).map((d, i) => ({
+                      name: d.deviceName,
+                      value: d.count,
+                      fill: INDIGO_PALETTE[i % INDIGO_PALETTE.length],
+                    }))}
+                    startAngle={90} endAngle={-270}
+                  >
+                    <RadialBar
+                      dataKey="value"
+                      cornerRadius={4}
+                      label={{ position: 'insideStart', fill: '#71717a', fontSize: 8, fontFamily: 'monospace' }}
+                    />
+                    <Tooltip
+                      content={({ active, payload }: any) => {
+                        if (!active || !payload?.length) return null;
+                        const d = payload[0].payload;
+                        const total = frsStats.byDevice.reduce((s, x) => s + x.count, 0);
+                        return (
+                          <div className={`${TT} px-3 py-2.5`}>
+                            <p className="text-zinc-200 text-[11px] font-mono font-semibold pb-1 mb-1 border-b border-white/5 truncate">{d.name}</p>
+                            <div className={TTRow}><span className={TTKey}>Detections</span><span className={TTVal}>{fmtN(d.value)}</span></div>
+                            <div className={TTRow}><span className={TTKey}>Share</span><span className="text-indigo-400 text-xs font-mono font-bold">{total > 0 ? ((d.value / total) * 100).toFixed(1) : 0}%</span></div>
+                          </div>
+                        );
+                      }}
+                    />
+                    <Legend
+                      iconSize={8} iconType="circle"
+                      formatter={(v: string) => <span className="text-zinc-500 text-[9px] font-mono truncate max-w-[80px] inline-block">{v}</span>}
+                    />
+                  </RadialBarChart>
+                </ResponsiveContainer>
+              </div>
+            </ChartCard>
+          </motion.div>
         )}
 
         {/* ── Pareto: Top Persons ── */}
@@ -1519,7 +1948,7 @@ export function AnalyticsPage() {
                 </span>
               }
             >
-              <div className="max-h-52 overflow-y-auto">
+              <div className="max-h-80 overflow-y-auto">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   {personsList.map(ps => {
                     const accent =
@@ -1565,70 +1994,117 @@ export function AnalyticsPage() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <motion.div initial={{ opacity: 0, x: -15 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: 1.5 }}>
-              <ChartCard title="Match Breakdown" subtitle="The donut splits all detections into watchlist matches (green) and unidentified faces (amber). The bars show the exact percentages — a higher green share means your cameras are seeing more enrolled persons.">
-                <div className="flex flex-col sm:flex-row items-center gap-4 pt-1">
-                  <div className="h-36 w-36 shrink-0">
+              <ChartCard title="Match Breakdown" subtitle="Watchlist matches vs unidentified faces with match rate and average confidence.">
+                <div className="flex flex-col sm:flex-row items-center gap-5 pt-1">
+                  <motion.div className="h-40 w-40 shrink-0 relative"
+                    initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
+                        <defs>
+                          <filter id="donut-glow">
+                            <feGaussianBlur stdDeviation="3" result="blur" />
+                            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                          </filter>
+                        </defs>
                         <Pie data={[{ name: 'Known', value: knownDet }, { name: 'Unknown', value: unknownDet }]}
-                          cx="50%" cy="50%" innerRadius={38} outerRadius={60}
-                          dataKey="value" paddingAngle={3} stroke="none">
+                          cx="50%" cy="50%" innerRadius={42} outerRadius={65}
+                          dataKey="value" paddingAngle={4} stroke="none" cornerRadius={4}
+                          isAnimationActive animationDuration={1000} animationEasing="ease-out">
                           <Cell fill="#10b981" /><Cell fill="#f59e0b" />
                         </Pie>
                         <Tooltip content={<PieTooltip />} />
                       </PieChart>
                     </ResponsiveContainer>
-                  </div>
-                  <div className="w-full space-y-2">
+                    {/* Center label */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-lg font-mono font-bold text-zinc-100">{matchRate.toFixed(0)}%</span>
+                      <span className="text-[9px] font-mono text-zinc-500">match</span>
+                    </div>
+                  </motion.div>
+                  <div className="w-full space-y-3">
                     {[
-                      { label: 'Known', val: knownDet, pct: matchRate, color: 'bg-emerald-500', text: 'text-emerald-400' },
-                      { label: 'Unknown', val: unknownDet, pct: 100 - matchRate, color: 'bg-amber-500', text: 'text-amber-400' },
-                    ].map(r => (
-                      <div key={r.label}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-400">
-                            <span className={`w-2 h-2 rounded-full ${r.color}`} />{r.label}
+                      { label: 'Known', val: knownDet, pct: matchRate, color: 'bg-emerald-500', text: 'text-emerald-400', ring: 'ring-emerald-500/20' },
+                      { label: 'Unknown', val: unknownDet, pct: 100 - matchRate, color: 'bg-amber-500', text: 'text-amber-400', ring: 'ring-amber-500/20' },
+                    ].map((r, idx) => (
+                      <motion.div key={r.label}
+                        initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.5, delay: 0.3 + idx * 0.15 }}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="flex items-center gap-2 text-[11px] font-mono text-zinc-300">
+                            <span className={`w-2.5 h-2.5 rounded-full ${r.color} ring-2 ${r.ring}`} />{r.label}
                           </span>
-                          <span className={`text-xs font-mono font-bold ${r.text}`}>
-                            {fmtN(r.val)} <span className="text-zinc-600 font-normal">({r.pct.toFixed(1)}%)</span>
+                          <span className={`text-sm font-mono font-bold ${r.text}`}>
+                            {fmtN(r.val)} <span className="text-zinc-600 font-normal text-xs">({r.pct.toFixed(1)}%)</span>
                           </span>
                         </div>
-                        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                          <div className={`h-full ${r.color} rounded-full transition-all duration-700`}
-                            style={{ width: `${Math.min(100, r.pct)}%` }} />
+                        <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                          <motion.div className={`h-full ${r.color} rounded-full`}
+                            initial={{ width: 0 }} animate={{ width: `${Math.min(100, r.pct)}%` }}
+                            transition={{ duration: 0.8, delay: 0.5 + idx * 0.15, ease: [0.16, 1, 0.3, 1] }} />
                         </div>
-                      </div>
+                      </motion.div>
                     ))}
-                    <div className="text-[10px] font-mono text-zinc-600 pt-1.5 border-t border-white/5 flex gap-3 flex-wrap">
+                    <motion.div className="text-[10px] font-mono text-zinc-500 pt-2 border-t border-white/5 flex gap-4 flex-wrap"
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}>
                       <span>Match rate: <span className="text-indigo-400 font-semibold">{matchRate.toFixed(1)}%</span></span>
                       <span>Avg conf: <span className="text-indigo-400 font-semibold">{(avgConf * 100).toFixed(1)}%</span></span>
-                    </div>
+                      <span>Total: <span className="text-zinc-300 font-semibold">{fmtN(totalDet)}</span></span>
+                    </motion.div>
                   </div>
                 </div>
               </ChartCard>
             </motion.div>
 
             <motion.div initial={{ opacity: 0, x: 15 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: 1.6 }}>
-              <ChartCard title="Watchlist Threat Levels" subtitle="Donut segments show how many enrolled persons fall into each threat tier. Use this to understand your watchlist composition and ensure high-threat subjects are adequately monitored.">
+              <ChartCard title="Watchlist Threat Levels" subtitle="Enrolled persons by threat tier.">
                 {frsByThreat.length > 0 ? (
-                  <div className="h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={frsByThreat} cx="50%" cy="50%" innerRadius={38} outerRadius={62}
-                          dataKey="value" nameKey="name" paddingAngle={3} stroke="none">
-                          {frsByThreat.map((e, i) => <Cell key={i} fill={THREAT_COLORS[e.name] ?? '#6366f1'} />)}
-                        </Pie>
-                        <Tooltip content={<PieTooltip />} />
-                        <Legend
-                          formatter={(v: string) => (
-                            <span className="text-zinc-400 text-[10px] font-mono">
-                              {v} ({frsByThreat.find(f => f.name === v)?.value ?? 0})
-                            </span>
-                          )}
-                          iconType="circle" iconSize={8}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
+                  <div className="flex flex-col sm:flex-row items-center gap-4">
+                    <motion.div className="h-40 w-40 shrink-0 relative"
+                      initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
+                      transition={{ duration: 0.6 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={frsByThreat} cx="50%" cy="50%" innerRadius={42} outerRadius={65}
+                            dataKey="value" nameKey="name" paddingAngle={4} stroke="none" cornerRadius={4}
+                            isAnimationActive animationDuration={1000} animationEasing="ease-out">
+                            {frsByThreat.map((e, i) => <Cell key={i} fill={THREAT_COLORS[e.name] ?? '#6366f1'} />)}
+                          </Pie>
+                          <Tooltip content={<PieTooltip />} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <span className="text-lg font-mono font-bold text-zinc-100">{frsByThreat.reduce((s, t) => s + t.value, 0)}</span>
+                        <span className="text-[9px] font-mono text-zinc-500">enrolled</span>
+                      </div>
+                    </motion.div>
+                    <div className="w-full space-y-2.5">
+                      {frsByThreat.map((t, idx) => {
+                        const total = frsByThreat.reduce((s, x) => s + x.value, 0);
+                        const pct = total > 0 ? (t.value / total) * 100 : 0;
+                        const col = THREAT_COLORS[t.name] ?? '#6366f1';
+                        return (
+                          <motion.div key={t.name}
+                            initial={{ opacity: 0, x: 15 }} animate={{ opacity: 1, x: 0 }}
+                            transition={{ duration: 0.4, delay: 0.3 + idx * 0.1 }}>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="flex items-center gap-2 text-[11px] font-mono text-zinc-300">
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: col }} />{t.name}
+                              </span>
+                              <span className="text-sm font-mono font-bold" style={{ color: col }}>
+                                {t.value} <span className="text-zinc-600 font-normal text-xs">({pct.toFixed(0)}%)</span>
+                              </span>
+                            </div>
+                            <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                              <motion.div className="h-full rounded-full"
+                                style={{ background: col }}
+                                initial={{ width: 0 }} animate={{ width: `${Math.min(100, pct)}%` }}
+                                transition={{ duration: 0.7, delay: 0.4 + idx * 0.1 }} />
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : (
                   <Empty className="min-h-0 h-48">

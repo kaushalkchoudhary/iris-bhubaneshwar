@@ -84,6 +84,13 @@ _shared_slot_counter: Optional[Value] = None          # atomic slot assignment
 _shared_inference_proc: Optional[Process] = None
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
 def _shared_inference_entry(input_queue, reply_queues: list, config: dict):
     """Top-level entry point for the shared inference subprocess."""
     # Re-add paths in subprocess (sys.path not reliably inherited through fork+exec).
@@ -214,17 +221,18 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
 
         threading.Thread(target=watchlist_updater, daemon=True, name="WatchlistUpdater").start()
 
-        # Single WebSocket client per camera:
-        # - raw frames (0x01) at up to 30 FPS via raw_stream_sender (with bbox overlay when detected)
-        # - detection JSON (0x02) at inference rate via detection_sender_worker
-        # Both share one connection.
-        websocket_server_url = camera_config.get('websocket_server_url', 'http://localhost:3002')
-        preview_client = create_live_preview_client(
-            camera_id=camera_config['camera_id'],
-            server_url=websocket_server_url,
-            max_fps=30,  # Restored to 30 for raw relay
-            frame_resize_height=240,
-        )
+        # Live preview streaming to backend /ws/publish is optional.
+        # Default OFF: keep only dockerized inference + event reporting to central.
+        preview_enabled = _env_flag("FRS_PREVIEW_WS_ENABLED", default=False)
+        preview_client = None
+        if preview_enabled:
+            websocket_server_url = camera_config.get('websocket_server_url', 'http://localhost:3002')
+            preview_client = create_live_preview_client(
+                camera_id=camera_config['camera_id'],
+                server_url=websocket_server_url,
+                max_fps=30,
+                frame_resize_height=240,
+            )
 
         # Camera configs for API reporter
         face_recognition_configs = {
@@ -372,7 +380,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
                     except _Empty:
                         pass
 
-                    if latest is not None:
+                    if latest is not None and preview_client is not None:
                         _cam_id, frame = latest
                         # We don't want bbox overlay on live feed to save frontend compute and because of FPS mismatch.
                         preview_client.send_frame(frame, detections=None)
@@ -383,8 +391,9 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
             except Exception as e:
                 logger.error(f"Raw stream sender error for {camera_config['name']}: {e}")
 
-        threading.Thread(target=raw_stream_sender, daemon=True,
-                         name=f"RawSender-{camera_config['camera_id'][:8]}").start()
+        if preview_enabled:
+            threading.Thread(target=raw_stream_sender, daemon=True,
+                             name=f"RawSender-{camera_config['camera_id'][:8]}").start()
 
         # Thread 2: Detection state updater — filters inference results and updates
         # the shared bbox state that raw_stream_sender reads on every frame.
@@ -417,8 +426,9 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
             except Exception as e:
                 logger.error(f"Detection sender error for {camera_config['name']}: {e}")
 
-        threading.Thread(target=detection_sender_worker, daemon=True,
-                         name=f"DetSender-{camera_config['camera_id'][:8]}").start()
+        if preview_enabled:
+            threading.Thread(target=detection_sender_worker, daemon=True,
+                             name=f"DetSender-{camera_config['camera_id'][:8]}").start()
 
         # Frame grabber
         # output_queues → inference pipeline (1-in-N frames via frame_skip)
@@ -427,7 +437,7 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
             name=camera_config['camera_id'],
             video_source=camera_config['rtsp_url'],
             output_queues=[frames_queue],
-            raw_output_queues=[raw_frames_queue],
+            raw_output_queues=[raw_frames_queue] if preview_enabled else [],
             rtsp_transport=cfg('rtsp_transport', 'tcp'),
             buffer_size=cfg('buffer_size', 10),
             frame_skip=cfg('skip_frames', 10),
@@ -454,10 +464,11 @@ def camera_worker_function(camera_config: dict, result_queue: Queue, stop_event:
         # Cleanup
         logger.info(f"Stopping FRS worker for {camera_config['name']}")
         frame_grabber.stop()
-        try:
-            preview_client.disconnect()
-        except Exception as e:
-            logger.error(f"Error disconnecting WebSocket for {camera_config['name']}: {e}")
+        if preview_client is not None:
+            try:
+                preview_client.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting WebSocket for {camera_config['name']}: {e}")
 
     except Exception as e:
         logger = logging.getLogger(f'frs_worker_{camera_config.get("camera_id", "unknown")[:8]}')

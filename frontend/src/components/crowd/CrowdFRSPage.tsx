@@ -52,18 +52,18 @@ const extractPersonGalleryImages = (person?: Person | null): string[] => {
   return [];
 };
 const FRS_TAB_ROUTES = {
-  live: '/frs/live',
-  watchlist: '/frs/watchlist',
-  search: '/frs/search',
-  alerts: '/frs/alerts',
-  unknown: '/frs/unknown',
+  live: '/public-safety/frs/live',
+  watchlist: '/public-safety/frs/watchlist',
+  search: '/public-safety/frs/search',
+  alerts: '/public-safety/frs/alerts',
+  unknown: '/public-safety/frs/unknown',
 } as const;
 
 type FrsTabKey = keyof typeof FRS_TAB_ROUTES;
 
 const resolveTabFromPath = (pathname: string): FrsTabKey | null => {
-  if (pathname === '/frs' || pathname === '/frs/') return 'live';
-  const segment = pathname.replace(/^\/frs\/?/, '').split('/')[0];
+  if (pathname === '/public-safety/frs' || pathname === '/public-safety/frs/') return 'live';
+  const segment = pathname.replace(/^\/public-safety\/frs\/?/, '').split('/')[0];
   if (segment === 'identified') return 'watchlist';
   if (segment in FRS_TAB_ROUTES) return segment as FrsTabKey;
   return null;
@@ -207,13 +207,68 @@ export function CrowdFRSPage() {
           cameraCount: w.cameraCount,
           resources: w.resources ?? undefined,
         })));
-        const cameras: Array<{ id: string; name: string; workerId?: string | null }> =
-          workerConfigs?.data ?? [];
+        const cameras: Array<{
+          id: string;
+          name: string;
+          workerId?: string | null;
+          analytics?: Array<{ config?: { worker_id?: string } }>;
+        }> = workerConfigs?.data ?? [];
         const byWorker: Record<string, Array<{ id: string; name: string }>> = {};
         for (const cam of cameras) {
-          if (!cam.workerId) continue;
-          if (!byWorker[cam.workerId]) byWorker[cam.workerId] = [];
-          byWorker[cam.workerId].push({ id: cam.id, name: cam.name });
+          const derivedWorkerId =
+            cam.workerId ||
+            cam.analytics?.find((a) => a?.config?.worker_id)?.config?.worker_id ||
+            null;
+          if (!derivedWorkerId) continue;
+          if (!byWorker[derivedWorkerId]) byWorker[derivedWorkerId] = [];
+          byWorker[derivedWorkerId].push({ id: cam.id, name: cam.name });
+        }
+
+        // Fallback #1: distributed plan endpoint carries assigned worker-camera mapping
+        // and is available for admin/operator/worker auth.
+        if (Object.keys(byWorker).length === 0 && statsRes.workers.length > 0) {
+          try {
+            const plan = await apiClient.getFRSDistributedPlan();
+            const cams: Array<{
+              device_id: string;
+              name: string;
+              assigned_worker_id?: string;
+              assigned_analytics?: string[];
+            }> = plan?.cameras ?? [];
+            for (const cam of cams) {
+              const wid = cam.assigned_worker_id;
+              if (!wid) continue;
+              const analytics = (cam.assigned_analytics ?? []).map((a) => String(a).toLowerCase());
+              if (analytics.length > 0 && !analytics.includes('frs')) continue;
+              if (!byWorker[wid]) byWorker[wid] = [];
+              byWorker[wid].push({ id: cam.device_id, name: cam.name || cam.device_id });
+            }
+          } catch {
+            // ignore and continue to next fallback
+          }
+        }
+
+        // Fallback #2: if still empty, load camera assignments directly per worker
+        // from admin worker camera assignment APIs.
+        if (Object.keys(byWorker).length === 0 && statsRes.workers.length > 0) {
+          const workerCameraLists: Array<[string, Array<{ id: string; name: string }>]> = await Promise.all(
+            statsRes.workers.map(async (w) => {
+              try {
+                const cams = await apiClient.getWorkerCameras(w.workerId);
+                const active = cams
+                  .filter((c) => c.isActive && c.deviceId)
+                  .map((c) => ({ id: c.deviceId, name: c.device?.name || c.deviceId }));
+                return [w.workerId, active];
+              } catch {
+                return [w.workerId, []];
+              }
+            })
+          );
+          for (const [workerId, cams] of workerCameraLists) {
+            if (cams.length > 0) {
+              byWorker[workerId] = cams;
+            }
+          }
         }
         setCamerasByWorker(byWorker);
       } catch (_) { /* silent */ }

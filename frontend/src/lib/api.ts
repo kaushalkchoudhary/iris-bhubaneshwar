@@ -213,6 +213,17 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
+export interface FRSDistributedPlanCamera {
+  device_id: string;
+  name: string;
+  assigned_worker_id?: string;
+  assigned_analytics?: string[];
+}
+
+export interface FRSDistributedPlanResponse {
+  cameras?: FRSDistributedPlanCamera[];
+}
+
 // Import worker types for use in ApiClient methods
 import type {
   WorkerStatus,
@@ -264,6 +275,7 @@ class ApiClient {
     let response = await fetch(`${this.baseUrl}${endpoint}`, {
       ...options,
       headers,
+      cache: options?.cache ?? 'no-store',
       credentials: 'same-origin',
     });
 
@@ -281,6 +293,7 @@ class ApiClient {
         response = await fetch(`${this.baseUrl}${endpoint}`, {
           ...options,
           headers: retryHeaders,
+          cache: options?.cache ?? 'no-store',
           credentials: 'same-origin',
         });
       }
@@ -520,6 +533,33 @@ class ApiClient {
     if (options?.granularity) params.append('granularity', options.granularity);
     const query = params.toString();
     return this.request<FRSTimelineBucket[]>(`/api/frs/timeline${query ? `?${query}` : ''}`);
+  }
+
+  async generateFRSReport(params: URLSearchParams): Promise<Blob> {
+    const token = localStorage.getItem('iris_token');
+    const headers: HeadersInit = {
+      'Accept': 'application/pdf',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${this.baseUrl}/api/frs/report?${params.toString()}`, {
+      method: 'GET',
+      headers,
+      credentials: 'same-origin',
+    });
+
+    if (!response.ok) {
+      let msg = `Report Error: ${response.status} ${response.statusText}`;
+      try {
+        const data = await response.json();
+        if (data?.error) msg = String(data.error);
+      } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+
+    return response.blob();
   }
 
   async getFRSGlobalIdentities(options?: {
@@ -917,7 +957,7 @@ class ApiClient {
       workers: WorkerLiveStat[];
       summary: { total: number; online: number; offline: number };
       checkedAt: string;
-    }>('/api/admin/workers/live-stats');
+    }>('/api/workers/live-stats');
   }
 
   async getWorkersPingStatus(): Promise<{
@@ -1015,6 +1055,10 @@ class ApiClient {
     return this.request<WorkerCameraAssignment[]>(`/api/admin/workers/${workerId}/cameras`);
   }
 
+  async getFRSDistributedPlan(): Promise<FRSDistributedPlanResponse> {
+    return this.request<FRSDistributedPlanResponse>('/api/frs/distributed/plan');
+  }
+
   // Admin: Unassign camera from worker
   async unassignCameraFromWorker(workerId: string, deviceId: string): Promise<void> {
     return this.request<void>(`/api/admin/workers/${workerId}/cameras/${deviceId}`, {
@@ -1110,6 +1154,18 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async getGodsEyePrompts(): Promise<{ mode: string; classes: string[]; referImage: string; visualPrompts: unknown[]; updatedAt: string }> {
+    return this.request('/api/gods-eye/prompts');
+  }
+
+  async setGodsEyePrompts(data: { mode: string; classes: string[]; referImage: string; visualPrompts: unknown[] }): Promise<{ ok: boolean }> {
+    return this.request('/api/gods-eye/prompts', { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  async getGodsEyeDetections(): Promise<Record<string, { ts: number; track_id: number; class: string; confidence: number }[]>> {
+    return this.request('/api/gods-eye/detections');
   }
 }
 

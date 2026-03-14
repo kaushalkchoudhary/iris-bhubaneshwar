@@ -86,7 +86,7 @@ case "${HTTP_CODE}" in
     *)       warn "HTTP health: ${HTTP_CODE} (unexpected response)" ;;
 esac
 
-# WebSocket port check (TCP)
+# Backend port check (TCP)
 WS_HOST="${BACKEND#http*://}"; WS_HOST="${WS_HOST%%/*}"
 WS_PORT="${WS_HOST##*:}"; WS_HOST="${WS_HOST%%:*}"
 [[ "${WS_PORT}" == "${WS_HOST}" ]] && WS_PORT=80
@@ -146,21 +146,21 @@ check_process "start_all_inference.py" "start_all_inference.py"
 check_process "FRS worker (run.py)"    "frs-analytics/run.py"
 check_process "crowd worker (run.py)"  "crowd-analytics/run.py"
 
-# ─── 6. WebSocket Publisher Status ───────────────────────────────────────────
-hdr "WebSocket Publisher (last 30 log lines)"
+# ─── 6. FRS Event Reporter Status ─────────────────────────────────────────────
+hdr "FRS Event Reporter (last 30 log lines)"
 
 FRS_LOG="${INFER_DIR}/logs/frs.log"
 EDGE_LOG_DIR="/var/log/iris-edge"
 
 if [[ -f "${FRS_LOG}" ]]; then
     echo -e "${DIM}Source: ${FRS_LOG}${RESET}"
-    grep -E "Feed publisher|WS.*error|WebSocket|preview.*client|Connected|connected" \
+    grep -E "api/events/ingest|reporter|heartbeat|face_detected|person_match|ERROR|error" \
         "${FRS_LOG}" 2>/dev/null | tail -15 || true
 elif [[ -d "${EDGE_LOG_DIR}" ]]; then
     LATEST_LOG="$(ls -t "${EDGE_LOG_DIR}"/*.log 2>/dev/null | head -1 || true)"
     if [[ -n "${LATEST_LOG}" ]]; then
         echo -e "${DIM}Source: ${LATEST_LOG}${RESET}"
-        grep -E "Feed publisher|WS.*error|WebSocket|preview.*client" \
+        grep -E "api/events/ingest|reporter|heartbeat|face_detected|person_match|ERROR|error" \
             "${LATEST_LOG}" 2>/dev/null | tail -15 || true
     else
         warn "No log files found in ${EDGE_LOG_DIR}"
@@ -169,29 +169,15 @@ else
     warn "FRS log not found at ${FRS_LOG}"
 fi
 
-# ─── 7. Live Feed Stats from Backend ─────────────────────────────────────────
-hdr "Live Feed Stats (backend)"
+# ─── 7. Event Ingest Endpoint Probe ──────────────────────────────────────────
+hdr "Event Ingest Endpoint (backend)"
 
-STATS_JSON="$(curl -s --max-time 5 "${API}/feeds/hub/stats" 2>/dev/null || echo '{}')"
-if echo "${STATS_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d)" &>/dev/null 2>&1; then
-    echo "${STATS_JSON}" | python3 -c "
-import sys, json, time
-d = json.load(sys.stdin)
-pub = d.get('publishingNow', [])
-total_pub = d.get('totalPublishers', 0)
-viewers = d.get('viewers', 0)
-print(f'  Total publishers : {total_pub}')
-print(f'  Active viewers   : {viewers}')
-if pub:
-    print(f'  Currently live   :')
-    for key in sorted(pub):
-        print(f'    {key}')
-else:
-    print(f'  Currently live   : (none)')
-" 2>/dev/null || echo "  Could not parse stats JSON"
-else
-    warn "Could not reach /api/feeds/hub/stats — backend may be down"
-fi
+INGEST_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "${API}/events/ingest" 2>/dev/null || echo '000')"
+case "${INGEST_CODE}" in
+    404|405) ok "Endpoint reachable: ${API}/events/ingest (HTTP ${INGEST_CODE})" ;;
+    000)     fail "Endpoint probe failed: backend unreachable" ;;
+    *)       warn "Endpoint probe returned HTTP ${INGEST_CODE}" ;;
+esac
 
 # ─── 8. System Resources ──────────────────────────────────────────────────────
 hdr "System Resources"

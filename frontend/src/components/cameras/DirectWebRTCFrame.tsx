@@ -7,6 +7,7 @@ interface DirectWebRTCFrameProps {
   cameraId: string;
   streamPath?: string;
   className?: string;
+  onConnectionChange?: (connected: boolean) => void;
 }
 
 function toStreamName(cameraId: string): string {
@@ -25,7 +26,7 @@ function buildWebRTCUrl(workerIp: string | undefined, cameraId: string, streamPa
   return `http://${ip}:${port}/${streamName}/`;
 }
 
-export function DirectWebRTCFrame({ workerIp, cameraId, streamPath, className }: DirectWebRTCFrameProps) {
+export function DirectWebRTCFrame({ workerIp, cameraId, streamPath, className, onConnectionChange }: DirectWebRTCFrameProps) {
   const src = buildWebRTCUrl(workerIp, cameraId, streamPath);
 
   if (!src) {
@@ -36,5 +37,5 @@ export function DirectWebRTCFrame({ workerIp, cameraId, streamPath, className }:
     );
   }
 
-  return <WebRTCPlayer streamUrl={src} className={cn('w-full h-full bg-black', className)} />;
+  return <WebRTCPlayer streamUrl={src} className={cn('w-full h-full bg-black', className)} onConnectionChange={onConnectionChange} />;
 }

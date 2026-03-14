@@ -21,12 +21,12 @@ func Main() *gorm.DB {
 	return DB
 }
 
-// FRS returns the FRS DB when configured, or falls back to primary DB.
+// FRS returns the dedicated FRS DB.
 func FRS() *gorm.DB {
-	if FRSDB != nil {
-		return FRSDB
+	if FRSDB == nil {
+		panic("FRS database is not initialized")
 	}
-	return DB
+	return FRSDB
 }
 
 func getGormLogLevel() logger.LogLevel {

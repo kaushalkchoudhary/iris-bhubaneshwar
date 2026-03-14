@@ -17,7 +17,7 @@ const itemByPath = new Map(allItems.map((item) => [item.path, item]));
 const SECTION_DEFAULT: Record<string, string> = {
   vms: '/live-feed',
   traffic: '/itms/anpr',
-  crowd: '/frs',
+  crowd: '/public-safety/frs',
   analytics: '/dashboard',
   system: '/settings',
 };

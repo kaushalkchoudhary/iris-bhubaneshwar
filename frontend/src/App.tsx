@@ -25,7 +25,7 @@ import { SettingsPage } from './components/settings/SettingsPage';
 import { OperatorAccessPage } from './components/settings/OperatorAccessPage';
 import { AnalyticsPage } from './components/analytics/AnalyticsPage';
 import { ReportsPage } from './components/reports/ReportsPage';
-import { GodsEyePage } from './components/godseye/GodsEyePage';
+import { GodsEyeTab } from './components/public-safety/GodsEyeTab';
 
 function PageLoader() {
   return (
@@ -70,9 +70,16 @@ function App() {
                             </Routes>
                           </Suspense>
                         } />
-                        <Route path="frs/*" element={<Suspense fallback={<PageLoader />}><CrowdFRSPage /></Suspense>} />
+                        <Route path="public-safety/*" element={
+                          <Suspense fallback={<PageLoader />}>
+                            <Routes>
+                              <Route path="/" element={<Navigate to="frs" replace />} />
+                              <Route path="frs/*" element={<CrowdFRSPage />} />
+                              <Route path="gods-eye" element={<GodsEyeTab />} />
+                            </Routes>
+                          </Suspense>
+                        } />
                         <Route path="dashboard" element={<Suspense fallback={<PageLoader />}><AnalyticsPage /></Suspense>} />
-                        <Route path="gods-eye" element={<Suspense fallback={<PageLoader />}><GodsEyePage /></Suspense>} />
                         <Route path="reports" element={<Suspense fallback={<PageLoader />}><ReportsPage /></Suspense>} />
                         <Route path="analytics/alerts" element={<Suspense fallback={<PageLoader />}><AlertsPage /></Suspense>} />
                         <Route path="settings/*" element={
@@ -90,8 +97,11 @@ function App() {
                       {/* Redirects */}
                       <Route path="/map" element={<Navigate to="/crowd-analytics" replace />} />
                       <Route path="/cameras" element={<Navigate to="/live-feed" replace />} />
-                      <Route path="/public-safety" element={<Navigate to="/frs" replace />} />
-                      <Route path="/crowd" element={<Navigate to="/frs" replace />} />
+                      <Route path="/public-safety" element={<Navigate to="/public-safety/frs" replace />} />
+                      <Route path="/frs" element={<Navigate to="/public-safety/frs" replace />} />
+                      <Route path="/frs/*" element={<Navigate to="/public-safety/frs" replace />} />
+                      <Route path="/gods-eye" element={<Navigate to="/public-safety/gods-eye" replace />} />
+                      <Route path="/crowd" element={<Navigate to="/public-safety/frs" replace />} />
                       <Route path="/analytics" element={<Navigate to="/dashboard" replace />} />
                       <Route path="/alerts" element={<Navigate to="/analytics/alerts" replace />} />
                       <Route path="/itms/alerts" element={<Navigate to="/analytics/alerts" replace />} />

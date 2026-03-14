@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Camera, BarChart3, Settings,
-  ChevronDown, Hexagon, Sun, Moon, PanelLeftClose, PanelLeft, ScanFace, FileText
+  ChevronDown, Hexagon, Sun, Moon, PanelLeftClose, PanelLeft, ScanFace, FileText, Radar
 } from 'lucide-react';
 import {
   Sidebar,
@@ -41,11 +41,12 @@ const modules: NavModule[] = [
     ],
   },
   {
-    id: 'frs',
-    label: 'Face Recognition',
+    id: 'public-safety',
+    label: 'Public Safety',
     icon: ScanFace,
     items: [
-      { path: '/frs', label: 'Detections & Alerts', icon: ScanFace },
+      { path: '/public-safety/frs', label: 'Face Recognition', icon: ScanFace },
+      { path: '/public-safety/gods-eye', label: "God's Eye", icon: Radar },
     ],
   },
   {
@@ -129,7 +130,7 @@ export function AppSidebar() {
       });
     }
     if (Object.keys(initial).length === 0) {
-      initial['frs'] = true;
+      initial['public-safety'] = true;
     }
     return initial;
   });

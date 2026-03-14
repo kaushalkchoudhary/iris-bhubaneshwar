@@ -9,6 +9,26 @@ FRONTEND_PORT="${FRONTEND_PORT:-8444}"
 BACKEND_PORT="${BACKEND_PORT:-3002}"
 ANPR_PORT="${ANPR_PORT:-8001}"
 LOCAL_INFERENCE_ENABLED="${LOCAL_INFERENCE_ENABLED:-0}"
+FORCE_RESTART=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --force-restart) FORCE_RESTART=1 ;;
+    -h|--help)
+      cat <<'USAGE'
+Usage: ./scripts/start_all_services.sh [--force-restart]
+
+Default behavior:
+- Reuses already-running backend/frontend services.
+- Starts only missing services.
+
+--force-restart:
+- Kills existing matching services and starts fresh.
+USAGE
+      exit 0
+      ;;
+  esac
+done
 
 mkdir -p "${DATE_DIR}"
 
@@ -23,6 +43,25 @@ fi
 is_port_listening() {
   local port="$1"
   lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+listener_pid() {
+  local port="$1"
+  lsof -t -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
+}
+
+kill_port_listener() {
+  local port="$1"
+  local pids
+  pids="$(lsof -t -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -n "${pids:-}" ]]; then
+    kill ${pids} || true
+    sleep 1
+    pids="$(lsof -t -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -n "${pids:-}" ]]; then
+      kill -9 ${pids} || true
+    fi
+  fi
 }
 
 ensure_databases() {
@@ -51,8 +90,6 @@ ensure_databases() {
   echo "      Install Docker Desktop or run PostgreSQL manually." >&2
 }
 
-
-# Stop any old processes for these services (best-effort).
 kill_by_pattern() {
   local pattern="$1"
   local pids
@@ -62,12 +99,17 @@ kill_by_pattern() {
   fi
 }
 
-kill_by_pattern "vite --port ${FRONTEND_PORT}"
-kill_by_pattern "go run main.go"
-kill_by_pattern "start_all_inference.py"
-kill_by_pattern "uvicorn anpr_vcc.api_server:app"
+if [[ "${FORCE_RESTART}" == "1" ]]; then
+  kill_by_pattern "vite --port ${FRONTEND_PORT}"
+  kill_by_pattern "go run main.go"
+  kill_by_pattern "/backend/go-backend"
+  kill_by_pattern "start_all_inference.py"
+  kill_by_pattern "uvicorn anpr_vcc.api_server:app"
+  kill_port_listener "${BACKEND_PORT}"
+  kill_port_listener "${FRONTEND_PORT}"
+  sleep 1
+fi
 
-sleep 1
 ensure_databases
 
 ensure_frontend_deps() {
@@ -93,8 +135,6 @@ fi
 if [[ -z "${FRS_DATABASE_URL:-}" ]]; then
   if is_port_listening 5434; then
     FRS_DATABASE_URL="postgresql://iris:iris_dev_password@127.0.0.1:5434/irisfrs?sslmode=disable"
-  elif is_port_listening 5432; then
-    FRS_DATABASE_URL="${DATABASE_URL:-postgresql://iris:iris_dev_password@127.0.0.1:5432/irisfrs?sslmode=disable}"
   fi
 fi
 
@@ -106,46 +146,72 @@ fi
 
 ensure_frontend_deps
 
+FRONTEND_PID=""
+BACKEND_PID=""
+
+if is_port_listening "${FRONTEND_PORT}"; then
+  FRONTEND_PID="$(listener_pid "${FRONTEND_PORT}")"
+  echo "Reusing existing frontend on port ${FRONTEND_PORT} (pid ${FRONTEND_PID:-unknown})"
+else
+  (
+    cd "${ROOT_DIR}/frontend"
+    nohup env VITE_BACKEND_URL="http://localhost:${BACKEND_PORT}" npm run dev -- --host 0.0.0.0 --port "${FRONTEND_PORT}" > "${DATE_DIR}/frontend.log" 2>&1 < /dev/null &
+    echo "$!" > "${DATE_DIR}/.frontend.newpid"
+  )
+  FRONTEND_PID="$(cat "${DATE_DIR}/.frontend.newpid" 2>/dev/null || true)"
+  rm -f "${DATE_DIR}/.frontend.newpid"
+fi
+
+if is_port_listening "${BACKEND_PORT}"; then
+  BACKEND_PID="$(listener_pid "${BACKEND_PORT}")"
+  echo "Reusing existing backend on port ${BACKEND_PORT} (pid ${BACKEND_PID:-unknown})"
+else
+  (
+    cd "${ROOT_DIR}/backend"
+    if [[ -f ".env" ]]; then
+      set -a
+      # shellcheck disable=SC1091
+      source ".env"
+      set +a
+    fi
+
+    BACKEND_CMD=(go run main.go)
+    BACKEND_USE_BINARY="${BACKEND_USE_BINARY:-1}"
+    if [[ "${BACKEND_USE_BINARY}" == "1" ]]; then
+      if go build -o "${ROOT_DIR}/backend/go-backend" main.go; then
+        BACKEND_CMD=("${ROOT_DIR}/backend/go-backend")
+      else
+        echo "WARN: backend build failed, falling back to go run main.go" >&2
+      fi
+    fi
+
+    nohup env \
+      DATABASE_URL="${DATABASE_URL}" \
+      FRS_DATABASE_URL="${FRS_DATABASE_URL}" \
+      MQTT_ENABLED="${MQTT_ENABLED:-true}" \
+      FEED_HUB_ENABLED="${FEED_HUB_ENABLED:-false}" \
+      GIN_MODE=release \
+      GIN_DISABLE_CONSOLE_COLOR=1 \
+      GORM_LOG_LEVEL=warn \
+      FRS_TOPOLOGY_SYNC_ON_START=1 \
+      FRS_TOPOLOGY_CONFIG_PATH="${ROOT_DIR}/backend/config/config.yml" \
+      PORT="${BACKEND_PORT}" \
+      BIND_ADDR=0.0.0.0 \
+      GOCACHE=/tmp/go-build-cache \
+      "${BACKEND_CMD[@]}" > "${DATE_DIR}/go-backend.log" 2>&1 < /dev/null &
+    echo "$!" > "${DATE_DIR}/.backend.newpid"
+  )
+  BACKEND_PID="$(cat "${DATE_DIR}/.backend.newpid" 2>/dev/null || true)"
+  rm -f "${DATE_DIR}/.backend.newpid"
+fi
+
 echo "DATE_DIR=${DATE_DIR}" > "${PID_FILE}"
 echo "FRONTEND_PORT=${FRONTEND_PORT}" >> "${PID_FILE}"
 echo "BACKEND_PORT=${BACKEND_PORT}" >> "${PID_FILE}"
 echo "ANPR_PORT=${ANPR_PORT}" >> "${PID_FILE}"
 echo "LOCAL_INFERENCE_ENABLED=${LOCAL_INFERENCE_ENABLED}" >> "${PID_FILE}"
-
-(
-  cd "${ROOT_DIR}/frontend"
-  nohup env VITE_BACKEND_URL="http://localhost:${BACKEND_PORT}" npm run dev -- --host 0.0.0.0 --port "${FRONTEND_PORT}" > "${DATE_DIR}/frontend.log" 2>&1 < /dev/null &
-  echo "FRONTEND_PID=$!" >> "${PID_FILE}"
-)
-
-(
-  cd "${ROOT_DIR}/backend"
-  if [[ -f ".env" ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source ".env"
-    set +a
-  fi
-
-  BACKEND_CMD=(go run main.go)
-  if [[ -x "${ROOT_DIR}/backend/go-backend" ]]; then
-    BACKEND_CMD=("${ROOT_DIR}/backend/go-backend")
-  fi
-
-  nohup env \
-    DATABASE_URL="${DATABASE_URL}" \
-    FRS_DATABASE_URL="${FRS_DATABASE_URL}" \
-    GIN_MODE=release \
-    GIN_DISABLE_CONSOLE_COLOR=1 \
-    GORM_LOG_LEVEL=warn \
-    FRS_TOPOLOGY_SYNC_ON_START=1 \
-    FRS_TOPOLOGY_CONFIG_PATH="${ROOT_DIR}/backend/config/config.yml" \
-    PORT="${BACKEND_PORT}" \
-    BIND_ADDR=0.0.0.0 \
-    GOCACHE=/tmp/go-build-cache \
-    "${BACKEND_CMD[@]}" > "${DATE_DIR}/go-backend.log" 2>&1 < /dev/null &
-  echo "BACKEND_PID=$!" >> "${PID_FILE}"
-)
+echo "FRONTEND_PID=${FRONTEND_PID}" >> "${PID_FILE}"
+echo "BACKEND_PID=${BACKEND_PID}" >> "${PID_FILE}"
 
 if [[ "${LOCAL_INFERENCE_ENABLED}" == "1" ]]; then
   (
@@ -160,21 +226,21 @@ if [[ "${LOCAL_INFERENCE_ENABLED}" == "1" ]]; then
       ./ANPR-VCC_analytics/.venv/bin/python start_all_inference.py \
         --single-log \
         --combined-log-file "${DATE_DIR}/inference.log" \
-        > "${DATE_DIR}/inference-launcher.log" 2>&1 &
+        > "${DATE_DIR}/inference-launcher.log" 2>&1 < /dev/null &
     echo "INFERENCE_PID=$!" >> "${PID_FILE}"
   )
 fi
 
-# Validate that started services are still alive after a short warmup.
+# Validate that started/reused services are alive.
 sleep 2
 source "${PID_FILE}"
-if ! kill -0 "${FRONTEND_PID}" 2>/dev/null; then
-  echo "ERROR: frontend process exited immediately (pid ${FRONTEND_PID})." >&2
+if [[ -n "${FRONTEND_PID:-}" ]] && ! kill -0 "${FRONTEND_PID}" 2>/dev/null; then
+  echo "ERROR: frontend process not alive (pid ${FRONTEND_PID})." >&2
   echo "Check log: ${DATE_DIR}/frontend.log" >&2
   exit 1
 fi
-if ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
-  echo "WARN: backend process exited immediately (pid ${BACKEND_PID})." >&2
+if [[ -n "${BACKEND_PID:-}" ]] && ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
+  echo "WARN: backend process not alive (pid ${BACKEND_PID})." >&2
   echo "Check log: ${DATE_DIR}/go-backend.log" >&2
 fi
 

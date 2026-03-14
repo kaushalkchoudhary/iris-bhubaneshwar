@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Map, Camera, Users,
   BarChart3, Bell, Settings, Monitor, Shield,
-  FileText, Cog, Server, ChevronRight, Zap, ArrowRight, UserCircle2, X, LogOut
+  FileText, Cog, Server, ChevronRight, Zap, ArrowRight, UserCircle2, X, LogOut, Radar
 } from 'lucide-react';
 import { MapBackground } from './MapBackground';
 import { playSound, playSoundName } from '@/hooks/useSound';
@@ -66,22 +66,23 @@ const mainModules: MainModule[] = [
     subItems: [
       // TEMP DISABLED: Crowd Analytics
       // { id: 'crowd-analytics', icon: Users, label: 'Crowd Analytics', desc: 'Density and flow monitoring', path: '/crowd-analytics' },
-      { id: 'frs', icon: Shield, label: 'Face Recognition', desc: 'Watchlist and unknown faces', path: '/frs' },
+      { id: 'frs', icon: Shield, label: 'Face Recognition', desc: 'Watchlist and unknown faces', path: '/frs/live' },
+      { id: 'gods-eye', icon: Radar, label: "God's Eye", desc: 'Promptable live object detection', path: '/public-safety/gods-eye' },
     ],
     info: {
-      brief: 'Face recognition system with watchlist management, real-time detection alerts, and unknown face logging for security and visitor tracking.',
+      brief: 'Face recognition and multimodal inference system with watchlist management, real-time alerts, and promptable edge intelligence.',
       color: '#FFB700',
       status: 'Active Monitoring',
       stats: [
         { val: '6', label: 'Watchlist' },
-        { val: '5', label: 'Detections' },
+        { val: 'YOLO', label: 'Engine' },
         { val: '6', label: 'Devices' },
       ],
-      features: ['Watchlist management', 'Real-time alerts', 'Unknown face logging', 'Face embedding search'],
+      features: ['Watchlist management', 'Promptable detection', 'Real-time alerts', 'Visual matching'],
       highlights: [
-        'Real-time face detection across all connected cameras',
-        'Instant alerts when watchlist persons are detected',
-        'Unknown face capture for manual review and enrollment',
+        'Real-time face detection and identification across nodes',
+        'God\'s Eye prompt engine for custom object detection',
+        'Automated watchlist alerts and unknown face logging',
       ],
     },
   },
@@ -449,8 +450,8 @@ export function HomePage() {
         const workers = workerTotal;
 
         const frsPersonsCount = frsPersonsRes.status === 'fulfilled' ? frsPersonsRes.value.length : 0;
-        const frsDetectionsCount = frsDetectionsRes.status === 'fulfilled' 
-          ? (frsDetectionsRes.value as unknown as { total?: number })?.total ?? (frsDetectionsRes.value as unknown as Array<unknown>).length ?? 0 
+        const frsDetectionsCount = frsDetectionsRes.status === 'fulfilled'
+          ? (frsDetectionsRes.value as unknown as { total?: number })?.total ?? (frsDetectionsRes.value as unknown as Array<unknown>).length ?? 0
           : 0;
         setFrsPersons(frsPersonsCount);
         setFrsDetections(frsDetectionsCount);

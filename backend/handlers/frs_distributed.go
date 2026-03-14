@@ -129,7 +129,7 @@ func GetFRSDistributedPlan(c *gin.Context) {
 	}
 
 	var devices []models.Device
-	if err := database.DB.Where("type = ? AND rtsp_url IS NOT NULL", models.DeviceTypeCamera).Order("created_at ASC").Find(&devices).Error; err != nil {
+	if err := database.DB.Where("LOWER(type) = ? AND rtsp_url IS NOT NULL", strings.ToLower(string(models.DeviceTypeCamera))).Order("created_at ASC").Find(&devices).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load camera devices"})
 		return
 	}

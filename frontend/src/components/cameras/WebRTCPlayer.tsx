@@ -3,9 +3,10 @@ import React, { useEffect, useRef } from 'react';
 interface WebRTCPlayerProps {
     streamUrl: string;
     className?: string;
+    onConnectionChange?: (connected: boolean) => void;
 }
 
-export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className }) => {
+export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className, onConnectionChange }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const whepUrl = (() => {
@@ -40,18 +41,21 @@ export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className
                         videoRef.current.srcObject = inboundStream;
                     }
                 }
+                onConnectionChange?.(true);
             };
 
             // Restart on connection failure or disconnect
             pc.onconnectionstatechange = () => {
                 if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
                     console.warn(`[WebRTC] Disconnected (${pc.connectionState}), retrying in 3s...`);
+                    onConnectionChange?.(false);
                     pc.close();
                     if (isActive) {
                         retryTimeout = setTimeout(connectStream, 3000);
                     }
                 } else {
                     console.log(`[WebRTC] Connection state: ${pc.connectionState}`);
+                    if (pc.connectionState === 'connected') onConnectionChange?.(true);
                 }
             };
 
@@ -86,6 +90,7 @@ export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className
                 })
                 .catch(err => {
                     console.error("[WebRTC] WHEP Error:", err);
+                    onConnectionChange?.(false);
                     pc.close();
                     if (isActive) {
                         retryTimeout = setTimeout(connectStream, 3000); // Retry every 3s
@@ -102,8 +107,9 @@ export const WebRTCPlayer: React.FC<WebRTCPlayerProps> = ({ streamUrl, className
                 pcRef.current.close();
                 pcRef.current = null;
             }
+            onConnectionChange?.(false);
         };
-    }, [whepUrl]);
+    }, [whepUrl, onConnectionChange]);
 
     return (
         <video

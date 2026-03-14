@@ -185,7 +185,34 @@ func GetFRSPersons(c *gin.Context) {
 
 // GetFRSPersonsForInference is a public read-only endpoint for inference services.
 func GetFRSPersonsForInference(c *gin.Context) {
-	GetFRSPersons(c)
+	var persons []models.FRSPerson
+	if err := database.FRS().Order("created_at DESC").Find(&persons).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
+	// Inference workers require embeddings for local matching on Jetsons.
+	out := make([]map[string]interface{}, 0, len(persons))
+	for _, p := range persons {
+		row := map[string]interface{}{
+			"id":         p.ID,
+			"name":       p.Name,
+			"createdAt":  p.CreatedAt,
+			"updatedAt":  p.UpdatedAt,
+			"embeddings": p.Embeddings.Data,
+		}
+		if p.Embedding.Data != nil {
+			row["embedding"] = p.Embedding.Data
+		}
+		if p.Category != nil {
+			row["category"] = *p.Category
+		}
+		if p.FaceImageURL != nil {
+			row["faceImageUrl"] = *p.FaceImageURL
+		}
+		out = append(out, row)
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func CreateFRSPerson(c *gin.Context) {
@@ -602,13 +629,12 @@ func GetFRSStats(c *gin.Context) {
 	var deviceStats []DeviceStat
 	db.Raw(fmt.Sprintf(`
 		SELECT
-			fd.device_id,
-			COALESCE(d.name, fd.device_id) AS device_name,
+			device_id,
+			device_id AS device_name,
 			COUNT(*) AS count
-		FROM frs_detections fd
-		LEFT JOIN devices d ON d.id = fd.device_id
+		FROM frs_detections
 		%s
-		GROUP BY fd.device_id, d.name
+		GROUP BY device_id
 		ORDER BY count DESC
 	`, whereSQL), whereArgs...).Scan(&deviceStats)
 
@@ -702,6 +728,7 @@ func GetFRSGlobalIdentities(c *gin.Context) {
 // GenerateFRSReport generates a PDF report by calling the Python report script.
 // GET /api/frs/report?title=...&filter=...&startTime=...&endTime=...&timeRange=...
 func GenerateFRSReport(c *gin.Context) {
+	log.Printf("[FRS Report] Request received: %s", c.Request.URL.String())
 	title := strings.TrimSpace(c.Query("title"))
 	if title == "" {
 		title = "FRS Analytics Report"
@@ -726,6 +753,7 @@ func GenerateFRSReport(c *gin.Context) {
 		}
 	}
 	if scriptPath == "" {
+		log.Printf("[FRS Report] Error: Report script not found")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Report script not found"})
 		return
 	}
@@ -733,6 +761,7 @@ func GenerateFRSReport(c *gin.Context) {
 	// Write output to a temp file.
 	tmpFile, err := os.CreateTemp("", "frs_report_*.pdf")
 	if err != nil {
+		log.Printf("[FRS Report] Error: Failed to create temp file: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp file"})
 		return
 	}
@@ -750,21 +779,26 @@ func GenerateFRSReport(c *gin.Context) {
 	}
 
 	frsDBURL := os.Getenv("FRS_DATABASE_URL")
+	uploadDir := func() string {
+		if d := os.Getenv("UPLOAD_DIR"); d != "" {
+			return d
+		}
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, "itms", "data")
+	}()
+
+	log.Printf("[FRS Report] Executing: python3 %s", strings.Join(args, " "))
+	log.Printf("[FRS Report] FRS_DATABASE_URL: %s", frsDBURL)
+	log.Printf("[FRS Report] UPLOAD_DIR: %s", uploadDir)
+
 	cmd := exec.Command("python3", args...)
 	cmd.Env = append(os.Environ(),
 		"FRS_DATABASE_URL="+frsDBURL,
-		"UPLOAD_DIR="+func() string {
-			if d := os.Getenv("UPLOAD_DIR"); d != "" {
-				return d
-			}
-			home, _ := os.UserHomeDir()
-			return filepath.Join(home, "itms", "data")
-		}(),
+		"UPLOAD_DIR="+uploadDir,
 	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	log.Printf("[FRS Report] Generating: title=%q filter=%q start=%s end=%s", title, filter, startTime, endTime)
 	if err := cmd.Run(); err != nil {
 		log.Printf("[FRS Report] Script failed: %v — stderr: %s", err, stderr.String())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Report generation failed", "detail": stderr.String()})
@@ -773,11 +807,13 @@ func GenerateFRSReport(c *gin.Context) {
 
 	pdfBytes, err := os.ReadFile(tmpPath)
 	if err != nil {
+		log.Printf("[FRS Report] Error: Failed to read generated PDF: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read generated PDF"})
 		return
 	}
 
 	filename := fmt.Sprintf("frs_report_%d.pdf", time.Now().Unix())
+	log.Printf("[FRS Report] Success: Sending %s (%d bytes)", filename, len(pdfBytes))
 	c.Header("Content-Disposition", "attachment; filename="+filename)
 	c.Header("Content-Type", "application/pdf")
 	c.Header("Content-Length", strconv.Itoa(len(pdfBytes)))

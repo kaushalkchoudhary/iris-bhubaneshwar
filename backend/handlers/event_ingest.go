@@ -801,6 +801,32 @@ func processFRSEvent(event IngestEvent, imageURLs map[string]string) error {
 			return err
 		}
 
+		// Emit a user-facing alert row for explicit known-person matches.
+		if personIDPtr != nil && strings.EqualFold(strings.TrimSpace(event.Type), "person_match") {
+			personName := ""
+			if pn, ok := data["person_name"].(string); ok {
+				personName = strings.TrimSpace(pn)
+			}
+			msg := "Known person match detected"
+			if personName != "" {
+				msg = fmt.Sprintf("Known person match: %s", personName)
+			}
+			alertMeta := map[string]interface{}{
+				"person_id":   *personIDPtr,
+				"person_name": personName,
+				"event_id":    event.ID,
+				"event_type":  event.Type,
+			}
+			_ = database.DB.Create(&models.WatchlistAlert{
+				AlertType: "person_match",
+				Message:   msg,
+				IsRead:    false,
+				DeviceID:  event.DeviceID,
+				Timestamp: *event.Timestamp,
+				Metadata:  models.NewJSONB(alertMeta),
+			}).Error
+		}
+
 		return nil
 	})
 }

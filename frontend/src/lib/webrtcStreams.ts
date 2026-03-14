@@ -3,6 +3,15 @@ export interface WebRTCEndpoint {
   streamPath: string;
 }
 
+// Problematic streams that frequently flap/unready on edge and should be
+// redirected to a healthy equivalent feed to avoid WHEP 404 loops in UI.
+const STREAM_REDIRECTS: Record<string, { ip?: string; streamPath: string }> = {
+  'camera_7c94effe-2a08-4e33-b30b-6069f8837a71': {
+    ip: '10.10.0.23',
+    streamPath: 'camera_da8df9ff-4694-430d-880b-82ea688e49b3',
+  },
+};
+
 // Streams discovered from Jetson 150 (/usr/local/uss/USSstreamcontroller.yaml)
 const CHANNEL_STREAM_150: Record<number, string> = {
   1: 'camera_055c5733-55b1-4429-9d42-5a4f02d661a3',
@@ -33,7 +42,9 @@ const CHANNEL_STREAM_150: Record<number, string> = {
 const CAM_D_TO_ENDPOINT: Record<string, WebRTCEndpoint> = {
   cam_d23: { ip: '10.10.0.23', streamPath: 'camera_2f55c80d-03f5-4175-97a2-56910a114171' },
   cam_d24: { ip: '10.10.0.23', streamPath: 'camera_3c8d59ec-0ffd-44ef-92f5-29b9a2f26dc6' },
-  cam_d25: { ip: '10.10.0.23', streamPath: 'camera_7c94effe-2a08-4e33-b30b-6069f8837a71' },
+  // camera_7c94... is currently not ready on 10.10.0.23 (MediaMTX returns 404 on WHEP).
+  // Route cam_d25 to a healthy local 23 stream to keep live UI stable.
+  cam_d25: { ip: '10.10.0.23', streamPath: 'camera_da8df9ff-4694-430d-880b-82ea688e49b3' },
   cam_d26: { ip: '10.10.0.23', streamPath: 'camera_46f08d98-b022-4745-98fa-bfead086929b' },
 };
 
@@ -59,7 +70,15 @@ export function resolveWebRTCEndpoint(
   if (!cam) return null;
 
   if (explicitStreamPath && explicitStreamPath.trim()) {
-    return { ip: (fallbackWorkerIp || '').trim(), streamPath: explicitStreamPath.trim() };
+    const explicit = explicitStreamPath.trim();
+    const redirected = STREAM_REDIRECTS[explicit];
+    if (redirected) {
+      return {
+        ip: redirected.ip || (fallbackWorkerIp || '').trim(),
+        streamPath: redirected.streamPath,
+      };
+    }
+    return { ip: (fallbackWorkerIp || '').trim(), streamPath: explicit };
   }
 
   const normalized = parseLegacyDcam(cam);
@@ -68,6 +87,13 @@ export function resolveWebRTCEndpoint(
   }
 
   if (cam.startsWith('camera_')) {
+    const redirected = STREAM_REDIRECTS[cam];
+    if (redirected) {
+      return {
+        ip: redirected.ip || (fallbackWorkerIp || '').trim(),
+        streamPath: redirected.streamPath,
+      };
+    }
     return { ip: (fallbackWorkerIp || '').trim(), streamPath: cam };
   }
 
@@ -77,4 +103,3 @@ export function resolveWebRTCEndpoint(
 
   return { ip: (fallbackWorkerIp || '').trim(), streamPath: `camera_${cam}` };
 }
-

@@ -51,6 +51,22 @@ func envInt(key string, fallback int) int {
 	return v
 }
 
+func envBool(key string, fallback bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if raw == "" {
+		return fallback
+	}
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		log.Printf("WARN: invalid %s=%q, using default %t", key, raw, fallback)
+		return fallback
+	}
+}
+
 func main() {
 	// Load environment variables
 	if err := godotenv.Load(); err != nil {
@@ -93,31 +109,34 @@ func main() {
 		defer stopMQTTIngest()
 	}
 
-	// Start embedded NATS server for central communication
-	// Using port 4233 to avoid conflict with MagicBox local NATS on 4222
-	natsPort := envInt("NATS_PORT", 4233)
-	natsServer, err := natsserver.New(natsserver.Config{
-		Port:       natsPort,
-		MaxPayload: 8 * 1024 * 1024, // 8MB for frames
-	})
-	if err != nil {
-		log.Fatalf("ERROR: failed to start NATS server: %v", err)
-	}
-	defer natsServer.Shutdown()
-	log.Printf("Central NATS server started on port %d", natsPort)
+	feedHubEnabled := envBool("FEED_HUB_ENABLED", false)
+	if feedHubEnabled {
+		// Start embedded NATS server for feed hub communication.
+		// Using port 4233 to avoid conflict with MagicBox local NATS on 4222.
+		natsPort := envInt("NATS_PORT", 4233)
+		natsServer, err := natsserver.New(natsserver.Config{
+			Port:       natsPort,
+			MaxPayload: 8 * 1024 * 1024, // 8MB for frames
+		})
+		if err != nil {
+			log.Fatalf("ERROR: failed to start NATS server: %v", err)
+		}
+		defer natsServer.Shutdown()
+		log.Printf("Feed-hub NATS server started on port %d", natsPort)
 
-	// Connect to NATS for feed hub
-	natsConn, err := nats.Connect(fmt.Sprintf("nats://localhost:%d", natsPort))
-	if err != nil {
-		log.Fatalf("ERROR: failed to connect to NATS: %v", err)
-	}
-	defer natsConn.Close()
+		natsConn, err := nats.Connect(fmt.Sprintf("nats://localhost:%d", natsPort))
+		if err != nil {
+			log.Fatalf("ERROR: failed to connect to NATS: %v", err)
+		}
+		defer natsConn.Close()
 
-	// Initialize feed hub for WebSocket streaming
-	feedHub := services.NewFeedHub(natsConn)
-	go feedHub.Run()
-	handlers.SetFeedHub(feedHub)
-	log.Println("Feed hub initialized")
+		feedHub := services.NewFeedHub(natsConn)
+		go feedHub.Run()
+		handlers.SetFeedHub(feedHub)
+		log.Println("Feed hub initialized")
+	} else {
+		log.Println("Feed hub disabled (set FEED_HUB_ENABLED=1 to enable WebSocket feed publish/view)")
+	}
 
 	// Initialize WireGuard service (optional). This requires privileged operations on many hosts.
 	wgEnabled := strings.TrimSpace(strings.ToLower(os.Getenv("WIREGUARD_ENABLED")))
@@ -275,10 +294,18 @@ func main() {
 		})
 	})
 
-	// WebSocket routes for camera feeds (outside /api group)
-	router.GET("/ws/feeds", handlers.HandleFeedWebSocket)
-	// Jetson publishers push frames to /ws/publish
-	router.GET("/ws/publish", handlers.HandleFeedPublish)
+	// Optional WebSocket routes for camera feeds (outside /api group)
+	if feedHubEnabled {
+		router.GET("/ws/feeds", handlers.HandleFeedWebSocket)
+		router.GET("/ws/publish", handlers.HandleFeedPublish)
+	} else {
+		router.GET("/ws/feeds", func(c *gin.Context) {
+			c.JSON(http.StatusGone, gin.H{"error": "WebSocket feed hub disabled"})
+		})
+		router.GET("/ws/publish", func(c *gin.Context) {
+			c.JSON(http.StatusGone, gin.H{"error": "WebSocket publish disabled"})
+		})
+	}
 
 	// API Routes
 	api := router.Group("/api")
@@ -338,6 +365,7 @@ func main() {
 		workers := api.Group("/workers")
 		{
 			workers.GET("/ping-status", middleware.AuthMiddleware(), middleware.RequireRoles("admin", "operator"), handlers.GetWorkersPingStatus)
+			workers.GET("/live-stats", middleware.AuthMiddleware(), middleware.RequireRoles("admin", "operator"), handlers.GetWorkerLiveStats)
 			workers.GET("/fleet-status", middleware.AuthMiddleware(), middleware.RequireRoles("admin", "operator"), handlers.GetJetsonFleetStatus)
 
 			// Registration
@@ -379,7 +407,6 @@ func main() {
 			{
 				adminWorkers.GET("", handlers.GetWorkers)
 				adminWorkers.POST("", handlers.CreateWorker)
-				adminWorkers.GET("/live-stats", handlers.GetWorkerLiveStats)
 				adminWorkers.GET("/:id", handlers.GetWorker)
 				adminWorkers.PUT("/:id", handlers.UpdateWorker)
 				adminWorkers.POST("/:id/revoke", handlers.RevokeWorker)
@@ -514,6 +541,15 @@ func main() {
 			frsDistributed.GET("/plan", handlers.GetFRSDistributedPlan)
 			frsDistributed.POST("/heartbeat", handlers.PostFRSDistributedHeartbeat)
 			frsDistributed.GET("/nodes", handlers.GetFRSDistributedNodes)
+		}
+
+		// Gods Eye routes — GET /prompts and POST /detections are unauthenticated (Jetsons poll)
+		godsEye := api.Group("/gods-eye")
+		{
+			godsEye.GET("/prompts", handlers.GetGodsEyePrompts)
+			godsEye.POST("/detections", handlers.PostGodsEyeDetections)
+			godsEye.GET("/detections", middleware.AuthMiddleware(), middleware.RequireRoles("admin", "operator"), handlers.GetGodsEyeDetections)
+			godsEye.PUT("/prompts", middleware.AuthMiddleware(), middleware.RequireRoles("admin", "operator"), handlers.SetGodsEyePrompts)
 		}
 
 		// Analytics routes

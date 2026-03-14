@@ -1276,6 +1276,10 @@ type workerLiveStat struct {
 // GetWorkerLiveStats pings all workers and returns combined live status + DB resources in one call.
 // GET /api/admin/workers/live-stats
 func GetWorkerLiveStats(c *gin.Context) {
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+
 	var workers []models.Worker
 	if err := database.DB.
 		Where("status <> ?", models.WorkerStatusRevoked).
@@ -1302,6 +1306,7 @@ func GetWorkerLiveStats(c *gin.Context) {
 	}
 
 	timeout := 1200 * time.Millisecond
+	heartbeatWindow := 45 * time.Second
 	checkedAt := time.Now().UTC()
 	out := make([]workerLiveStat, len(workers))
 
@@ -1318,9 +1323,16 @@ func GetWorkerLiveStats(c *gin.Context) {
 
 			reachable, latencyMs, pingErr := pingWorkerIP(w.IP, timeout)
 			now := time.Now().UTC()
+			lastSeenAgoSec := int64(now.Sub(w.LastSeen).Seconds())
+			heartbeatFresh := lastSeenAgoSec >= 0 && now.Sub(w.LastSeen) <= heartbeatWindow
 			errStr := ""
 			if pingErr != nil {
 				errStr = pingErr.Error()
+			}
+			isOnline := reachable && heartbeatFresh
+			var resources interface{}
+			if heartbeatFresh {
+				resources = w.Resources.Data
 			}
 			out[i] = workerLiveStat{
 				WorkerID:      w.ID,
@@ -1329,12 +1341,12 @@ func GetWorkerLiveStats(c *gin.Context) {
 				Model:         w.Model,
 				Status:        w.Status,
 				LastSeen:      w.LastSeen,
-				LastSeenAgo:   int64(now.Sub(w.LastSeen).Seconds()),
-				Reachable:     reachable,
-				LatencyMs:     latencyMs,
+				LastSeenAgo:   lastSeenAgoSec,
+				Reachable:     isOnline,
+				LatencyMs:     func() int64 { if isOnline { return latencyMs }; return 0 }(),
 				PingError:     errStr,
 				CameraCount:   camCounts[w.ID],
-				Resources:     w.Resources.Data,
+				Resources:     resources,
 				ConfigVersion: w.ConfigVersion,
 				CheckedAt:     checkedAt,
 			}
