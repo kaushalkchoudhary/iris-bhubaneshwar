@@ -664,32 +664,70 @@ function SankeyChart({ flows, knownTotal, unknownTotal }: {
   );
 }
 
+// ── Scroll-triggered animation hook ─────────────────────────────────────────
+
+function useInViewAnimation(ref: React.RefObject<HTMLElement | null>, dep: unknown, duration = 1000) {
+  const [progress, setProgress] = useState(0);
+  const hasPlayed = useRef(false);
+
+  useEffect(() => {
+    hasPlayed.current = false;
+    setProgress(0);
+  }, [dep]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !hasPlayed.current) {
+          hasPlayed.current = true;
+          let raf: number;
+          const start = performance.now();
+          const tick = (now: number) => {
+            const t = Math.min((now - start) / duration, 1);
+            setProgress(1 - Math.pow(1 - t, 3));
+            if (t < 1) raf = requestAnimationFrame(tick);
+          };
+          raf = requestAnimationFrame(tick);
+        }
+      },
+      { threshold: 0.2 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, duration, dep]);
+
+  return progress;
+}
+
 // ── BumpChart (Rank Trace) ──────────────────────────────────────────────────
 
 function BumpChart({ data, colors, labels }: { data: { name: string; ranks: (number | null)[] }[]; colors: string[]; labels?: string[] }) {
   const [hov, setHov] = useState<number | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
-  const [animProg, setAnimProg] = useState(0);
+  const animProg = useInViewAnimation(containerRef, data, 1000);
 
-  useEffect(() => {
-    let raf: number;
-    const start = performance.now();
-    const dur = 1000;
-    const tick = (now: number) => {
-      const t = Math.min((now - start) / dur, 1);
-      setAnimProg(1 - Math.pow(1 - t, 3));
-      if (t < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [data]);
-
-  const VW = 500, VH = 220, PADL = 36, PADR = 20, PADT = 20, PADB = 28;
+  const VW = 500, VH = 220, PADL = 36, PADR = 68, PADT = 20, PADB = 28;
   if (!data.length || !data[0].ranks.length) return <div className="h-full flex items-center justify-center text-zinc-600 text-[11px] font-mono">Insufficient data for trace</div>;
 
-  const steps = data[0].ranks.length;
-  const maxRank = Math.max(...data.flatMap(d => d.ranks.filter(r => r !== null) as number[]), 1);
+  // Trim leading/trailing periods where ALL cameras have null ranks
+  const totalSteps = data[0].ranks.length;
+  let firstActive = totalSteps, lastActive = 0;
+  for (let i = 0; i < totalSteps; i++) {
+    if (data.some(d => d.ranks[i] !== null)) {
+      firstActive = Math.min(firstActive, i);
+      lastActive = Math.max(lastActive, i);
+    }
+  }
+  if (firstActive > lastActive) firstActive = lastActive = 0;
+  const trimmedData = data.map(d => ({ ...d, ranks: d.ranks.slice(firstActive, lastActive + 1) }));
+  const trimmedLabels = labels?.slice(firstActive, lastActive + 1);
+
+  const steps = trimmedData[0].ranks.length;
+  const maxRank = Math.max(...trimmedData.flatMap(d => d.ranks.filter(r => r !== null) as number[]), 1);
   const dx = (VW - PADL - PADR) / (steps - 1 || 1);
   const dy = (VH - PADT - PADB) / (maxRank - 1 || 1);
 
@@ -723,7 +761,7 @@ function BumpChart({ data, colors, labels }: { data: { name: string; ranks: (num
         ))}
 
         {/* Lines */}
-        {data.map((series, i) => {
+        {trimmedData.map((series, i) => {
           const pts = series.ranks.map((r, idx) => r === null ? null : {
             x: PADL + idx * dx,
             y: PADT + (r - 1) * dy
@@ -781,7 +819,7 @@ function BumpChart({ data, colors, labels }: { data: { name: string; ranks: (num
           );
         })}
       </svg>
-      <BumpTooltip hov={hov} mousePos={mousePos} data={data} labels={labels} />
+      <BumpTooltip hov={hov} mousePos={mousePos} data={trimmedData} labels={trimmedLabels} />
     </div>
   );
 }
@@ -929,27 +967,176 @@ const ChordDiagram = memo(function ChordDiagram({ matrix, labels, colors }: { ma
 });
 
 
+// ── Custom StreamGraph ───────────────────────────────────────────────────────
+
+// Cubic spline interpolation for ultra-smooth upsampling
+function cubicInterp(ys: number[], factor: number): number[] {
+  const n = ys.length;
+  if (n < 2) return ys;
+  const out: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = ys[Math.max(0, i - 1)];
+    const p1 = ys[i];
+    const p2 = ys[i + 1];
+    const p3 = ys[Math.min(n - 1, i + 2)];
+    for (let s = 0; s < factor; s++) {
+      const t = s / factor;
+      const t2 = t * t, t3 = t2 * t;
+      out.push(0.5 * (
+        (2 * p1) +
+        (-p0 + p2) * t +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+      ));
+    }
+  }
+  out.push(ys[n - 1]);
+  return out;
+}
+
+function StreamGraph({ data, cameras, colors }: {
+  data: Record<string, number>[]; cameras: string[]; colors: string[];
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hov, setHov] = useState<number | null>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const animProg = useInViewAnimation(containerRef, data, 1800);
+
+  const VW = 730, VH = 240, PAD_B = 20;
+  const n = data.length;
+  const nCams = cameras.length;
+
+  if (n < 2 || nCams === 0) return <div className="h-full flex items-center justify-center text-zinc-600 text-[11px] font-mono">No stream data</div>;
+
+  // Upsample factor — more points = smoother river
+  const UP = Math.max(1, Math.ceil(80 / n));
+
+  // Extract per-camera series and upsample with cubic spline
+  const upsampled: number[][] = [];
+  for (let j = 0; j < nCams; j++) {
+    const raw = data.map(row => row[cameras[j]] || 0);
+    upsampled.push(cubicInterp(raw, UP));
+  }
+  const m = upsampled[0].length; // total upsampled points
+
+  // Clamp negatives from spline overshoot
+  for (let j = 0; j < nCams; j++) {
+    for (let i = 0; i < m; i++) {
+      if (upsampled[j][i] < 0) upsampled[j][i] = 0;
+    }
+  }
+
+  // Compute totals and stack with silhouette (centered) baseline
+  const totals = Array(m).fill(0);
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < nCams; j++) totals[i] += upsampled[j][i];
+  }
+  const maxTotal = Math.max(...totals, 1);
+  const usableH = VH - PAD_B;
+  const scale = usableH * 0.48;
+
+  const stackBot: number[][] = Array.from({ length: nCams }, () => []);
+  const stackTop: number[][] = Array.from({ length: nCams }, () => []);
+
+  for (let i = 0; i < m; i++) {
+    // Silhouette: offset so stack is vertically centered
+    let y0 = -(totals[i] / maxTotal) * scale;
+    for (let j = 0; j < nCams; j++) {
+      const h = (upsampled[j][i] / maxTotal) * scale * 2;
+      stackBot[j][i] = y0;
+      stackTop[j][i] = y0 + h;
+      y0 += h;
+    }
+  }
+
+  // Convert stack values to SVG coordinates
+  const sx = (i: number) => (i / (m - 1)) * VW;
+  const sy = (v: number) => usableH / 2 - v;
+
+  // Build smooth SVG path from dense points (no bezier needed — density is enough)
+  const buildArea = (topVals: number[], botVals: number[]): string => {
+    let d = `M ${sx(0)} ${sy(topVals[0])}`;
+    for (let i = 1; i < m; i++) d += ` L ${sx(i)} ${sy(topVals[i])}`;
+    d += ` L ${sx(m - 1)} ${sy(botVals[m - 1])}`;
+    for (let i = m - 2; i >= 0; i--) d += ` L ${sx(i)} ${sy(botVals[i])}`;
+    d += ' Z';
+    return d;
+  };
+
+  const layerPaths = cameras.map((_, j) => buildArea(stackTop[j], stackBot[j]));
+
+  // Labels from original data
+  const labelInterval = Math.max(1, Math.floor(n / 10));
+  const labels = data.map((row: any) => row.label as string);
+
+  return (
+    <div ref={containerRef} className="relative w-full h-full"
+      onMouseMove={e => {
+        const r = containerRef.current?.getBoundingClientRect();
+        if (r) setMousePos({ x: e.clientX - r.left, y: e.clientY - r.top });
+      }}
+      onMouseLeave={() => setHov(null)}
+    >
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-full" preserveAspectRatio="none">
+        <defs>
+          {cameras.map((_, i) => {
+            const col = colors[i % colors.length];
+            return (
+              <linearGradient key={i} id={`sg-grad-${i}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={col} stopOpacity={1} />
+                <stop offset="100%" stopColor={col} stopOpacity={0.75} />
+              </linearGradient>
+            );
+          })}
+        </defs>
+
+        <g style={{ opacity: animProg }}>
+          {layerPaths.map((d, i) => {
+            const isActive = hov === null || hov === i;
+            return (
+              <path key={cameras[i]} d={d}
+                fill={`url(#sg-grad-${i})`}
+                fillOpacity={isActive ? 1 : 0.15}
+                stroke="none"
+                onMouseEnter={() => setHov(i)} onMouseLeave={() => setHov(null)}
+                className="cursor-pointer transition-[fill-opacity] duration-300"
+                style={{ clipPath: `inset(0 ${(1 - animProg) * 100}% 0 0)` }}
+              />
+            );
+          })}
+        </g>
+
+        {/* X-axis labels */}
+        {labels.map((label, i) => i % labelInterval === 0 ? (
+          <text key={i} x={(i / (n - 1)) * VW} y={VH - 4} fontSize={8} fill="#52525b" textAnchor="middle" fontFamily="monospace">
+            {label}
+          </text>
+        ) : null)}
+      </svg>
+
+      {hov !== null && (
+        <div className="absolute z-50 pointer-events-none bg-zinc-900/95 border border-white/10 backdrop-blur-md rounded-lg px-3 py-2 shadow-2xl"
+          style={{ left: mousePos.x + 16, top: mousePos.y - 40 }}>
+          <p className="text-[11px] font-mono font-semibold mb-1" style={{ color: colors[hov % colors.length] }}>
+            {cameras[hov]}
+          </p>
+          <p className="text-[10px] font-mono text-zinc-400">
+            {fmtN(data.reduce((s, row) => s + (row[cameras[hov]] || 0), 0))} total detections
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Marimekko chart ───────────────────────────────────────────────────────────
 
 function MarimekkoChart({ data }: { data: { name: string; known: number; unknown: number; total: number }[] }) {
   const [hovIdx, setHovIdx] = useState<number | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
-  const [animProgress, setAnimProgress] = useState(0);
-
-  useEffect(() => {
-    let raf: number;
-    const start = performance.now();
-    const dur = 800;
-    const tick = (now: number) => {
-      const t = Math.min((now - start) / dur, 1);
-      // ease-out cubic
-      setAnimProgress(1 - Math.pow(1 - t, 3));
-      if (t < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [data]);
+  const animProgress = useInViewAnimation(containerRef, data, 800);
 
   const totalAll = data.reduce((s, d) => s + d.total, 0);
   if (!totalAll || !data.length) return (
@@ -1249,7 +1436,7 @@ export function AnalyticsPage() {
   }, [stats.frsTimeline, dets, granularity]);
 
   // Per-camera stream data for the multi-layer stream graph
-  const STREAM_BLUES = ['#0c2d48', '#145680', '#1a74a8', '#2b8cc4', '#4da6d8', '#7dc0e6', '#aed8f0'];
+  const STREAM_BLUES = ['#00375E', '#005EA3', '#0085E5', '#35A2FF', '#4FBBFF', '#44A0DB', '#A1DBFF'];
   const streamCamData = useMemo(() => {
     const topCams = cameraFlows.slice(0, 7).map(f => f.name);
     if (!topCams.length || !dets.length) return { labels: [] as string[], cameras: [] as string[], rows: [] as Record<string, number>[] };
@@ -1753,56 +1940,9 @@ export function AnalyticsPage() {
                 action={<ColorLegend items={streamCamData.cameras.slice(0, 5).map((c, i) => ({ label: c, color: STREAM_BLUES[i % STREAM_BLUES.length] }))} />}
               >
                 {streamCamData.rows.length > 0 && streamCamData.cameras.length > 0 ? (
-                  <motion.div className="h-56"
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                    transition={{ duration: 0.8 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={streamCamData.rows} stackOffset="silhouette"
-                        margin={{ left: 0, right: 0, top: 4, bottom: 20 }}>
-                        <XAxis dataKey="label"
-                          tick={{ fill: '#52525b', fontSize: 8, fontFamily: 'monospace' }}
-                          axisLine={false} tickLine={false}
-                          interval={Math.max(1, Math.floor(streamCamData.rows.length / 10))}
-                        />
-                        <YAxis hide />
-                        <Tooltip
-                          content={({ active, payload, label }: any) => {
-                            if (!active || !payload?.length) return null;
-                            const total = payload.reduce((s: number, p: any) => s + (Math.abs(p.value) || 0), 0);
-                            return (
-                              <div className="bg-zinc-900/95 border border-white/10 backdrop-blur-md rounded-lg px-3 py-2.5 shadow-2xl min-w-[165px]">
-                                <p className="text-[11px] font-mono font-semibold text-zinc-200 mb-1.5">{label}</p>
-                                <div className="space-y-1">
-                                  {[...payload].reverse().filter((p: any) => Math.abs(p.value) > 0).map((p: any, i: number) => (
-                                    <div key={i} className="flex justify-between gap-3">
-                                      <span className="flex items-center gap-1.5 text-zinc-400 text-[10px] font-mono">
-                                        <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: p.fill || p.color || p.stroke }} />{p.name}
-                                      </span>
-                                      <span className="text-zinc-200 text-xs font-mono font-bold">{fmtN(Math.abs(p.value))}</span>
-                                    </div>
-                                  ))}
-                                  <div className="flex justify-between gap-3 pt-1.5 border-t border-white/5">
-                                    <span className="text-zinc-500 text-[10px] font-mono">Total</span>
-                                    <span className="text-zinc-100 text-xs font-mono font-bold">{fmtN(total)}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          }}
-                          cursor={{ stroke: 'rgba(255,255,255,0.25)', strokeWidth: 1, strokeDasharray: '4 2' }}
-                        />
-                        {streamCamData.cameras.map((cam, i) => (
-                          <Area key={cam} type="natural" dataKey={cam} name={cam} stackId="1"
-                            stroke="none" strokeWidth={0}
-                            fill={STREAM_BLUES[i % STREAM_BLUES.length]} fillOpacity={1}
-                            dot={false}
-                            activeDot={{ r: 3, fill: '#fff', stroke: STREAM_BLUES[i % STREAM_BLUES.length], strokeWidth: 2 }}
-                            isAnimationActive animationDuration={1800} animationEasing="ease-out"
-                            animationBegin={i * 60} />
-                        ))}
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </motion.div>
+                  <div className="h-56">
+                    <StreamGraph data={streamCamData.rows} cameras={streamCamData.cameras} colors={STREAM_BLUES} />
+                  </div>
                 ) : (
                   <Empty className="min-h-0 h-52">
                     <EmptyIcon><Activity /></EmptyIcon>
